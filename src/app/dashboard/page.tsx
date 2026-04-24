@@ -39,10 +39,17 @@ export default function Dashboard() {
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [lastUpdated, setLastUpdated] = useState('')
 
-  useEffect(() => {
+  const loadData = () => {
     fetch('/api/data')
       .then(r => r.json())
       .then((d: GA4Store) => setStore(d))
+  }
+
+  useEffect(() => {
+    loadData()
+    // Auto-refresh every 5 minutes
+    const interval = setInterval(loadData, 5 * 60 * 1000)
+    return () => clearInterval(interval)
   }, [])
 
   async function runAnalysis() {
