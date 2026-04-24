@@ -6,7 +6,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function GET() {
   const { data: rows, error } = await analyticsDb
-    .from('ga4_data')
+    .from('analytics_ga4')
     .select('*')
     .order('date', { ascending: false })
     .limit(500)

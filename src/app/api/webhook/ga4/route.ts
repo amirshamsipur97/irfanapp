@@ -38,9 +38,9 @@ export async function POST(req: NextRequest) {
   }
 
   const dates = [...new Set(rows.map(r => r.date))]
-  await analyticsDb.from('ga4_data').delete().in('date', dates)
+  await analyticsDb.from('analytics_ga4').delete().in('date', dates)
 
-  const { error } = await analyticsDb.from('ga4_data').insert(rows)
+  const { error } = await analyticsDb.from('analytics_ga4').insert(rows)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ success: true, count: rows.length })

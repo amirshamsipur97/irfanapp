@@ -3,7 +3,7 @@ import { analyticsDb } from '@/lib/supabase'
 
 export async function GET() {
   const { data, error } = await analyticsDb
-    .from('ga4_data')
+    .from('analytics_ga4')
     .select('*')
     .order('date', { ascending: false })
     .limit(500)
