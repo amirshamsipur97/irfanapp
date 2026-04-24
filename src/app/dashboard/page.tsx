@@ -10,10 +10,11 @@ interface GA4Row {
   date: string
   country: string
   city: string
-  pageLocation: string
-  active28DayUsers: number
+  page_location: string
+  active_28_day_users: number
   checkouts: number
-  pageViews: number
+  page_views: number
+  synced_at?: string
 }
 
 interface GA4Store {
@@ -65,8 +66,8 @@ export default function Dashboard() {
   const byDate = Object.entries(
     store.rows.reduce((acc: Record<string, { pageViews: number; users: number }>, r) => {
       if (!acc[r.date]) acc[r.date] = { pageViews: 0, users: 0 }
-      acc[r.date].pageViews += r.pageViews
-      acc[r.date].users += r.active28DayUsers
+      acc[r.date].pageViews += r.page_views
+      acc[r.date].users += r.active_28_day_users
       return acc
     }, {})
   )
@@ -76,8 +77,8 @@ export default function Dashboard() {
   // Top pages
   const topPages = Object.entries(
     store.rows.reduce((acc: Record<string, number>, r) => {
-      const short = r.pageLocation.replace('https://irfaninvest.com', '') || '/'
-      acc[short] = (acc[short] || 0) + r.pageViews
+      const short = r.page_location.replace('https://irfaninvest.com', '') || '/'
+      acc[short] = (acc[short] || 0) + r.page_views
       return acc
     }, {})
   )
@@ -88,7 +89,7 @@ export default function Dashboard() {
   // Countries
   const countries = Object.entries(
     store.rows.reduce((acc: Record<string, number>, r) => {
-      acc[r.country] = (acc[r.country] || 0) + r.active28DayUsers
+      acc[r.country] = (acc[r.country] || 0) + r.active_28_day_users
       return acc
     }, {})
   )
@@ -96,8 +97,8 @@ export default function Dashboard() {
     .slice(0, 5)
     .map(([name, value]) => ({ name, value }))
 
-  const totalViews = store.rows.reduce((s, r) => s + r.pageViews, 0)
-  const totalUsers = store.rows.reduce((s, r) => s + r.active28DayUsers, 0)
+  const totalViews = store.rows.reduce((s, r) => s + r.page_views, 0)
+  const totalUsers = store.rows.reduce((s, r) => s + r.active_28_day_users, 0)
   const totalCheckouts = store.rows.reduce((s, r) => s + r.checkouts, 0)
 
   return (
