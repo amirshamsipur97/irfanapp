@@ -1,103 +1,60 @@
-import Image from "next/image";
+const imgBg = "https://www.figma.com/api/mcp/asset/9f79706b-05c8-4b6f-9905-ec6624c23835";
+const imgLogo = "https://www.figma.com/api/mcp/asset/ec8ebe91-0c65-4c6a-b22b-c9b5af54a1c6";
+const imgBackdropBase = "https://www.figma.com/api/mcp/asset/5227797c-0b94-467b-93f1-a2cef516bc52";
+const imgIcon = "https://www.figma.com/api/mcp/asset/5cb5eaa6-15fe-4b76-8fe1-26318d26b143";
 
-export default function Home() {
+export default function SplashScreen() {
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <div className="flex min-h-screen items-center justify-center bg-gray-100">
+      <div className="bg-[#a259ff] h-[896px] overflow-hidden relative w-[414px]">
+        {/* Background */}
+        <div className="absolute h-[975px] left-[-195px] top-[-251px] w-[1032px]">
+          <img alt="" className="absolute inset-0 w-full h-full object-cover" src={imgBg} />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        {/* Logo */}
+        <div className="absolute left-[20px] top-[63px] size-[63px]">
+          <img alt="Logo" className="w-full h-full object-contain" src={imgLogo} />
+        </div>
+
+        {/* Backdrop card */}
+        <div className="absolute inset-x-0 bottom-0 top-[312px]">
+          <img alt="" className="absolute inset-0 w-full h-full object-fill" src={imgBackdropBase} />
+
+          {/* Icon */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-[80px] size-[104px]">
+            <img alt="Delivery icon" className="w-full h-full object-contain" src={imgIcon} />
+          </div>
+
+          {/* Heading */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-[210px] w-[326px] text-center">
+            <p className="font-bold text-[34px] leading-[41px] tracking-[0.41px] text-[#2d0c57]">
+              Non-Contact Deliveries
+            </p>
+          </div>
+
+          {/* Body text */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-[295px] w-[374px] text-center">
+            <p className="text-[17px] leading-[1.5] tracking-[-0.41px] text-[#9586a8]">
+              When placing an order, select the option "Contactless delivery" and the courier will leave your order at the door.
+            </p>
+          </div>
+
+          {/* Primary button */}
+          <div className="absolute left-[20px] right-[20px] top-[424px]">
+            <a href="/categories" className="flex items-center justify-center w-full h-[56px] bg-[#0bce83] rounded-[8px] text-white text-[15px] font-semibold tracking-[-0.01px] uppercase">
+              Order Now
+            </a>
+          </div>
+
+          {/* Dismiss */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-[512px]">
+            <button className="text-[#9586a8] text-[15px] font-semibold tracking-[-0.01px] uppercase">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
