@@ -24,14 +24,24 @@ interface GA4Row {
 }
 
 interface GA4Store { lastUpdated: string; rows: GA4Row[] }
+
+interface Insight { title: string; detail: string; impact: 'high'|'medium'|'low' }
+interface Recommendation { title: string; detail: string; priority: 'urgent'|'high'|'medium' }
+interface ContentGap { topic: string; reason: string }
+interface PriorityAction { action: string; timeframe: string; impact: 'high'|'medium'|'low' }
+interface AnalysisMetrics { conversionRate: number; engagementScore: number; internationalTraffic: number }
+
 interface Analysis {
   summary: string
-  topInsights: string[]
-  seoRecommendations: string[]
+  score: number
+  topInsights: Insight[]
+  seoRecommendations: Recommendation[]
   geographicOpportunities: string
-  contentGaps: string[]
-  priorityActions: string[]
+  contentGaps: ContentGap[]
+  priorityActions: PriorityAction[]
+  metrics: AnalysisMetrics
 }
+interface AnalysisResponse { analysis: Analysis; snapshot: Record<string, unknown>; lastUpdated: string }
 
 const GOLD = '#c9a84c'
 const GOLD_LIGHT = '#e8c97e'
@@ -67,9 +77,10 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 
 export default function Dashboard() {
   const [store, setStore] = useState<GA4Store | null>(null)
-  const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [analysisResp, setAnalysisResp] = useState<AnalysisResponse | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [tab, setTab] = useState<'overview' | 'pages' | 'geo' | 'ai'>('overview')
+  const analysis = analysisResp?.analysis ?? null
 
   const loadData = () =>
     fetch('/api/data').then(r => r.json()).then((d: GA4Store) => setStore(d))
@@ -85,7 +96,7 @@ export default function Dashboard() {
     setTab('ai')
     const res = await fetch('/api/analyze')
     const data = await res.json()
-    setAnalysis(data.analysis)
+    setAnalysisResp(data)
     setLoadingAnalysis(false)
   }
 
@@ -344,60 +355,162 @@ export default function Dashboard() {
 
         {/* ── AI Tab ── */}
         {tab === 'ai' && (
-          <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-6">
+          <div className="space-y-4">
             {!analysis && !loadingAnalysis && (
-              <div className="flex flex-col items-center py-12 gap-4">
+              <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl flex flex-col items-center py-16 gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#c9a84c] to-[#e8c97e] flex items-center justify-center text-2xl text-[#0a0f1a] font-bold">✦</div>
-                <p className="text-white font-semibold">Claude AI SEO Analysis</p>
-                <p className="text-[#8a9bbf] text-sm text-center max-w-sm">Get personalized SEO recommendations for irfaninvest.com based on your real traffic data.</p>
+                <p className="text-white font-semibold text-lg">Claude AI SEO Analysis</p>
+                <p className="text-[#8a9bbf] text-sm text-center max-w-sm px-4">Get personalized SEO insights and recommendations based on your real traffic data.</p>
                 <button onClick={runAnalysis} disabled={!hasData}
-                  className="mt-2 bg-gradient-to-r from-[#c9a84c] to-[#e8c97e] text-[#0a0f1a] px-6 py-3 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-[#c9a84c]/20 transition-all">
+                  className="mt-2 bg-gradient-to-r from-[#c9a84c] to-[#e8c97e] text-[#0a0f1a] px-8 py-3 rounded-xl font-bold text-sm hover:shadow-lg hover:shadow-[#c9a84c]/20 transition-all disabled:opacity-50">
                   Run Analysis
                 </button>
               </div>
             )}
+
             {loadingAnalysis && (
-              <div className="flex flex-col items-center py-12 gap-3">
-                <div className="w-8 h-8 border-2 border-[#c9a84c] border-t-transparent rounded-full animate-spin" />
-                <p className="text-[#8a9bbf] text-sm">Claude is analyzing your data…</p>
+              <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl flex flex-col items-center py-16 gap-4">
+                <div className="w-10 h-10 border-2 border-[#c9a84c] border-t-transparent rounded-full animate-spin" />
+                <p className="text-white font-medium">Analyzing your data…</p>
+                <p className="text-[#8a9bbf] text-xs">Claude is reviewing traffic, pages, and geographic patterns</p>
               </div>
             )}
+
             {analysis && !loadingAnalysis && (
-              <div className="space-y-6">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#c9a84c] to-[#e8c97e] flex items-center justify-center text-sm text-[#0a0f1a] font-bold flex-shrink-0">✦</div>
-                  <p className="text-[#e2e8f0] text-sm leading-relaxed">{analysis.summary}</p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {[
-                    { title: 'Key Insights', items: analysis.topInsights, color: GOLD },
-                    { title: 'SEO Recommendations', items: analysis.seoRecommendations, color: BLUE },
-                    { title: 'Priority Actions', items: analysis.priorityActions, color: '#22c55e' },
-                    { title: 'Content Gaps', items: analysis.contentGaps, color: '#f43f5e' },
-                  ].map(({ title, items, color }) => (
-                    <div key={title} className="bg-[#0a0f1a] rounded-xl p-4">
-                      <h4 className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color }}>{title}</h4>
-                      <ul className="space-y-2">
-                        {items?.map((item, i) => (
-                          <li key={i} className="flex gap-2 text-sm text-[#e2e8f0]">
-                            <span style={{ color }} className="flex-shrink-0 mt-0.5">›</span>{item}
-                          </li>
-                        ))}
-                      </ul>
+              <>
+                {/* Score + Summary */}
+                <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+                    {/* Score ring */}
+                    <div className="flex-shrink-0 flex flex-col items-center">
+                      <div className="relative w-24 h-24">
+                        <svg className="w-24 h-24 -rotate-90" viewBox="0 0 88 88">
+                          <circle cx="44" cy="44" r="38" fill="none" stroke="#1e2d4a" strokeWidth="8"/>
+                          <circle cx="44" cy="44" r="38" fill="none" stroke={GOLD} strokeWidth="8"
+                            strokeDasharray={`${2 * Math.PI * 38 * (analysis.score ?? 0) / 100} ${2 * Math.PI * 38}`}
+                            strokeLinecap="round"/>
+                        </svg>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                          <span className="text-2xl font-bold text-[#c9a84c]">{analysis.score ?? '—'}</span>
+                          <span className="text-[10px] text-[#8a9bbf]">SEO Score</span>
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                {analysis.geographicOpportunities && (
-                  <div className="bg-[#0a0f1a] rounded-xl p-4 border-l-2" style={{ borderColor: GOLD }}>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#c9a84c] mb-2">Geographic Opportunities</h4>
-                    <p className="text-sm text-[#e2e8f0]">{analysis.geographicOpportunities}</p>
+                    {/* Summary */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-[#c9a84c] to-[#e8c97e] flex items-center justify-center text-xs text-[#0a0f1a] font-bold">✦</div>
+                        <h3 className="text-sm font-bold text-white">Executive Summary</h3>
+                      </div>
+                      <p className="text-[#e2e8f0] text-sm leading-relaxed">{analysis.summary}</p>
+                    </div>
                   </div>
-                )}
-                <button onClick={runAnalysis}
-                  className="text-xs text-[#8a9bbf] hover:text-[#c9a84c] transition-colors">
-                  ↻ Re-run analysis
-                </button>
-              </div>
+
+                  {/* Mini metrics */}
+                  {analysis.metrics && (
+                    <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-[#1e2d4a]">
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-[#c9a84c]">{analysis.metrics.conversionRate ?? 0}%</p>
+                        <p className="text-[10px] text-[#8a9bbf] uppercase tracking-wider mt-0.5">Conversion Rate</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-[#3b82f6]">{analysis.metrics.engagementScore ?? 0}</p>
+                        <p className="text-[10px] text-[#8a9bbf] uppercase tracking-wider mt-0.5">Engagement Score</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-[#0d9488]">{analysis.metrics.internationalTraffic ?? 0}%</p>
+                        <p className="text-[10px] text-[#8a9bbf] uppercase tracking-wider mt-0.5">Intl. Traffic</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Insights + Recommendations */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Key Insights */}
+                  <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#c9a84c] mb-4">Key Insights</h4>
+                    <div className="space-y-3">
+                      {analysis.topInsights?.map((ins, i) => (
+                        <div key={i} className="flex gap-3 p-3 bg-[#0a0f1a] rounded-xl">
+                          <span className={`mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 h-fit ${
+                            ins.impact === 'high' ? 'bg-[#c9a84c]/20 text-[#c9a84c]' :
+                            ins.impact === 'medium' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'
+                          }`}>{ins.impact}</span>
+                          <div>
+                            <p className="text-sm font-semibold text-white mb-0.5">{ins.title}</p>
+                            <p className="text-xs text-[#8a9bbf] leading-relaxed">{ins.detail}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* SEO Recommendations */}
+                  <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#3b82f6] mb-4">SEO Recommendations</h4>
+                    <div className="space-y-3">
+                      {analysis.seoRecommendations?.map((rec, i) => (
+                        <div key={i} className="flex gap-3 p-3 bg-[#0a0f1a] rounded-xl">
+                          <span className={`mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 h-fit ${
+                            rec.priority === 'urgent' ? 'bg-red-500/20 text-red-400' :
+                            rec.priority === 'high' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'
+                          }`}>{rec.priority}</span>
+                          <div>
+                            <p className="text-sm font-semibold text-white mb-0.5">{rec.title}</p>
+                            <p className="text-xs text-[#8a9bbf] leading-relaxed">{rec.detail}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Priority Actions */}
+                <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-[#22c55e] mb-4">Priority Actions</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {analysis.priorityActions?.map((a, i) => (
+                      <div key={i} className="bg-[#0a0f1a] rounded-xl p-4 border-t-2" style={{ borderColor: i === 0 ? '#f43f5e' : i === 1 ? '#f59e0b' : '#22c55e' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-xs text-[#8a9bbf] bg-[#1e2d4a] px-2 py-0.5 rounded-full">{a.timeframe}</span>
+                          <span className={`text-xs font-bold ${a.impact === 'high' ? 'text-[#c9a84c]' : 'text-[#8a9bbf]'}`}>{a.impact} impact</span>
+                        </div>
+                        <p className="text-sm text-white leading-relaxed">{a.action}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Content Gaps + Geo */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#f43f5e] mb-4">Content Gaps</h4>
+                    <div className="space-y-3">
+                      {analysis.contentGaps?.map((g, i) => (
+                        <div key={i} className="flex gap-3 items-start p-3 bg-[#0a0f1a] rounded-xl">
+                          <span className="text-[#f43f5e] text-lg leading-none flex-shrink-0">!</span>
+                          <div>
+                            <p className="text-sm font-semibold text-white mb-0.5">{g.topic}</p>
+                            <p className="text-xs text-[#8a9bbf]">{g.reason}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5 border-l-2" style={{ borderLeftColor: GOLD }}>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#c9a84c] mb-3">Geographic Strategy</h4>
+                    <p className="text-sm text-[#e2e8f0] leading-relaxed">{analysis.geographicOpportunities}</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button onClick={runAnalysis} className="text-xs text-[#8a9bbf] hover:text-[#c9a84c] transition-colors flex items-center gap-1">
+                    ↻ Re-run analysis
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}

@@ -12,61 +12,94 @@ export async function GET() {
     .limit(500)
 
   if (error || !rows?.length) {
-    return NextResponse.json({ error: 'No data available. Run n8n workflow first.' }, { status: 404 })
+    return NextResponse.json({ error: 'No data available.' }, { status: 404 })
   }
 
-  const totalPageViews = rows.reduce((s, r) => s + (r.page_views ?? 0), 0)
-  const totalUsers = rows.reduce((s, r) => s + (r.active_28_day_users ?? 0), 0)
+  const totalPageViews = rows.reduce((s, r) => s + (r.screen_page_views || r.page_views || 0), 0)
+  const totalUsers28 = rows.reduce((s, r) => s + (r.active_28_day_users || 0), 0)
+  const totalActiveToday = rows.reduce((s, r) => s + (r.active_1_day_users || 0), 0)
+  const totalEvents = rows.reduce((s, r) => s + (r.event_count || 0), 0)
+  const totalLeads = rows.reduce((s, r) => s + (r.generate_lead_events || 0), 0)
 
   const topPages = Object.entries(
     rows.reduce((acc: Record<string, number>, r) => {
-      acc[r.page_location] = (acc[r.page_location] || 0) + r.page_views
+      const p = (r.page_location || '').replace('https://irfaninvest.com', '') || '/'
+      acc[p] = (acc[p] || 0) + (r.screen_page_views || r.page_views || 0)
       return acc
     }, {})
-  ).sort((a, b) => b[1] - a[1]).slice(0, 10)
+  ).sort((a, b) => b[1] - a[1]).slice(0, 8)
 
   const topCountries = Object.entries(
     rows.reduce((acc: Record<string, number>, r) => {
-      acc[r.country] = (acc[r.country] || 0) + r.active_28_day_users
+      acc[r.country] = (acc[r.country] || 0) + (r.active_28_day_users || 0)
       return acc
     }, {})
   ).sort((a, b) => b[1] - a[1]).slice(0, 5)
 
-  const prompt = `You are an SEO and real estate website analyst. Analyze this Google Analytics data for irfaninvest.com (a real estate investment website in Oman) and provide actionable SEO insights in English.
+  const dateRange = { from: rows[rows.length - 1]?.date, to: rows[0]?.date }
 
-Data Summary:
+  const prompt = `You are an expert SEO analyst and digital marketing strategist for real estate websites. Analyze the Google Analytics 4 data for irfaninvest.com — a luxury real estate investment website focused on Oman properties (ITC zones, freehold properties for foreigners).
+
+DATA SUMMARY:
+- Date Range: ${dateRange.from} to ${dateRange.to}
 - Total Page Views: ${totalPageViews}
-- Total Active 28-Day Users: ${totalUsers}
+- Active Users (28-day): ${totalUsers28}
+- Active Users (Today): ${totalActiveToday}
+- Total Events: ${totalEvents}
+- Lead Generation Events: ${totalLeads}
 
-Top Pages by Views:
-${topPages.map(([page, views]) => `  ${page}: ${views} views`).join('\n')}
+TOP PAGES (by views):
+${topPages.map(([p, v], i) => `${i + 1}. ${p} — ${v} views`).join('\n')}
 
-Top Countries by Users:
-${topCountries.map(([country, users]) => `  ${country}: ${users} users`).join('\n')}
+TOP COUNTRIES (by users):
+${topCountries.map(([c, u], i) => `${i + 1}. ${c} — ${u} users`).join('\n')}
 
-Respond with JSON only:
+Return ONLY valid JSON (no markdown, no code blocks, no extra text) in this exact structure:
 {
-  "summary": "2-sentence overview",
-  "topInsights": ["insight 1", "insight 2", "insight 3"],
-  "seoRecommendations": ["rec 1", "rec 2", "rec 3", "rec 4"],
-  "geographicOpportunities": "analysis of geographic data",
-  "contentGaps": ["gap 1", "gap 2"],
-  "priorityActions": ["action 1", "action 2", "action 3"]
+  "summary": "2-3 sentence executive summary of the website performance",
+  "score": <overall SEO health score 0-100 as integer>,
+  "topInsights": [
+    {"title": "insight title", "detail": "1-2 sentence detail", "impact": "high|medium|low"}
+  ],
+  "seoRecommendations": [
+    {"title": "recommendation title", "detail": "specific actionable step", "priority": "urgent|high|medium"}
+  ],
+  "geographicOpportunities": "2-3 sentences about geographic strategy",
+  "contentGaps": [
+    {"topic": "missing content topic", "reason": "why this matters for SEO"}
+  ],
+  "priorityActions": [
+    {"action": "specific action", "timeframe": "48h|1 week|1 month", "impact": "high|medium|low"}
+  ],
+  "metrics": {
+    "conversionRate": <leads/users percentage as number>,
+    "engagementScore": <events/pageviews ratio as number rounded to 1 decimal>,
+    "internationalTraffic": <percentage of non-Oman users as integer>
+  }
 }`
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   })
 
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  const jsonMatch = text.match(/\{[\s\S]*\}/)
-  const analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: text }
+  // Strip any markdown code blocks if present
+  const clean = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim()
+
+  let analysis
+  try {
+    analysis = JSON.parse(clean)
+  } catch {
+    // Fallback: try to extract JSON object
+    const match = clean.match(/\{[\s\S]*\}/)
+    analysis = match ? JSON.parse(match[0]) : { summary: text }
+  }
 
   return NextResponse.json({
     analysis,
-    dataSnapshot: { totalPageViews, totalUsers, topPages, topCountries },
+    snapshot: { totalPageViews, totalUsers28, totalActiveToday, totalEvents, totalLeads, topPages, topCountries },
     lastUpdated: rows[0]?.synced_at,
   })
 }
