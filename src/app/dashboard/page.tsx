@@ -12,8 +12,14 @@ interface GA4Row {
   city: string
   page_location: string
   active_28_day_users: number
-  checkouts: number
+  active_1_day_users: number
+  total_users: number
   page_views: number
+  screen_page_views: number
+  event_count: number
+  sessions_per_user: number
+  checkouts: number
+  generate_lead_events: number
   synced_at?: string
 }
 
@@ -73,19 +79,19 @@ export default function Dashboard() {
   const byDate = Object.entries(
     store.rows.reduce((acc: Record<string, { pageViews: number; users: number }>, r) => {
       if (!acc[r.date]) acc[r.date] = { pageViews: 0, users: 0 }
-      acc[r.date].pageViews += r.page_views
-      acc[r.date].users += r.active_28_day_users
+      acc[r.date].pageViews += (r.screen_page_views || r.page_views || 0)
+      acc[r.date].users += (r.active_1_day_users || r.active_28_day_users || 0)
       return acc
     }, {})
   )
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, v]) => ({ date: date.slice(4), ...v }))
+    .map(([date, v]) => ({ date: date.slice(5), ...v }))
 
   // Top pages
   const topPages = Object.entries(
     store.rows.reduce((acc: Record<string, number>, r) => {
-      const short = r.page_location.replace('https://irfaninvest.com', '') || '/'
-      acc[short] = (acc[short] || 0) + r.page_views
+      const short = (r.page_location || '').replace('https://irfaninvest.com', '') || '/'
+      acc[short] = (acc[short] || 0) + (r.screen_page_views || r.page_views || 0)
       return acc
     }, {})
   )
@@ -104,8 +110,11 @@ export default function Dashboard() {
     .slice(0, 5)
     .map(([name, value]) => ({ name, value }))
 
-  const totalViews = store.rows.reduce((s, r) => s + r.page_views, 0)
+  const totalViews = store.rows.reduce((s, r) => s + (r.screen_page_views || r.page_views || 0), 0)
   const totalUsers = store.rows.reduce((s, r) => s + r.active_28_day_users, 0)
+  const totalActiveToday = store.rows.reduce((s, r) => s + (r.active_1_day_users || 0), 0)
+  const totalEvents = store.rows.reduce((s, r) => s + (r.event_count || 0), 0)
+  const totalLeads = store.rows.reduce((s, r) => s + (r.generate_lead_events || 0), 0)
   const totalCheckouts = store.rows.reduce((s, r) => s + r.checkouts, 0)
 
   return (
@@ -144,18 +153,26 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPI Cards */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-5 gap-4 mb-6">
             <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
               <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Page Views</p>
               <p className="text-3xl font-bold text-white">{totalViews.toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+              <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Active Today</p>
+              <p className="text-3xl font-bold text-green-400">{totalActiveToday.toLocaleString()}</p>
             </div>
             <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
               <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Active Users (28d)</p>
               <p className="text-3xl font-bold text-emerald-400">{totalUsers.toLocaleString()}</p>
             </div>
             <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-              <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Checkouts</p>
-              <p className="text-3xl font-bold text-blue-400">{totalCheckouts.toLocaleString()}</p>
+              <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Events</p>
+              <p className="text-3xl font-bold text-blue-400">{totalEvents.toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+              <p className="text-gray-400 text-xs uppercase tracking-wider mb-1">Leads</p>
+              <p className="text-3xl font-bold text-yellow-400">{totalLeads.toLocaleString()}</p>
             </div>
           </div>
 
