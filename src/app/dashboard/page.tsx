@@ -79,6 +79,7 @@ export default function Dashboard() {
   const [store, setStore] = useState<GA4Store | null>(null)
   const [analysisResp, setAnalysisResp] = useState<AnalysisResponse | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const [tab, setTab] = useState<'overview' | 'pages' | 'geo' | 'ai'>('overview')
   const analysis = analysisResp?.analysis ?? null
 
@@ -93,11 +94,23 @@ export default function Dashboard() {
 
   const runAnalysis = async () => {
     setLoadingAnalysis(true)
+    setAnalysisError(null)
     setTab('ai')
-    const res = await fetch('/api/analyze')
-    const data = await res.json()
-    setAnalysisResp(data)
-    setLoadingAnalysis(false)
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 55000)
+      const res = await fetch('/api/analyze', { signal: controller.signal })
+      clearTimeout(timeout)
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setAnalysisResp(data)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? (e.name === 'AbortError' ? 'Request timed out. Please try again.' : e.message) : 'Unknown error'
+      setAnalysisError(msg)
+    } finally {
+      setLoadingAnalysis(false)
+    }
   }
 
   if (!store) return (
@@ -373,6 +386,19 @@ export default function Dashboard() {
                 <div className="w-10 h-10 border-2 border-[#c9a84c] border-t-transparent rounded-full animate-spin" />
                 <p className="text-white font-medium">Analyzing your data…</p>
                 <p className="text-[#8a9bbf] text-xs">Claude is reviewing traffic, pages, and geographic patterns</p>
+                <p className="text-[#8a9bbf] text-xs opacity-60">This may take up to 30 seconds</p>
+              </div>
+            )}
+
+            {analysisError && !loadingAnalysis && (
+              <div className="bg-[#0f1629] border border-red-900/50 rounded-2xl flex flex-col items-center py-12 gap-4">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-2xl">⚠</div>
+                <p className="text-red-400 font-medium">Analysis failed</p>
+                <p className="text-[#8a9bbf] text-sm text-center max-w-sm">{analysisError}</p>
+                <button onClick={runAnalysis}
+                  className="mt-2 bg-[#1e2d4a] hover:bg-[#2a3d5a] text-white px-6 py-2 rounded-xl text-sm font-medium transition-colors">
+                  Try again
+                </button>
               </div>
             )}
 
