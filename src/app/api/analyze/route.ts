@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { supabase } from '@/lib/supabase'
+import { analyticsDb } from '@/lib/supabase'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function GET() {
-  const { data: rows, error } = await supabase
-    .from('ga4_analytics')
+  const { data: rows, error } = await analyticsDb
+    .from('ga4_data')
     .select('*')
     .order('date', { ascending: false })
     .limit(500)
@@ -32,9 +32,9 @@ export async function GET() {
     }, {})
   ).sort((a, b) => b[1] - a[1]).slice(0, 5)
 
-  const prompt = `You are an SEO and real estate website analyst. Analyze this Google Analytics data for irfaninvest.com (a real estate investment website) and provide actionable SEO insights.
+  const prompt = `You are an SEO and real estate website analyst. Analyze this Google Analytics data for irfaninvest.com (a real estate investment website in Oman) and provide actionable SEO insights in English.
 
-Data Summary (Last 7 days):
+Data Summary:
 - Total Page Views: ${totalPageViews}
 - Total Active 28-Day Users: ${totalUsers}
 
@@ -44,9 +44,9 @@ ${topPages.map(([page, views]) => `  ${page}: ${views} views`).join('\n')}
 Top Countries by Users:
 ${topCountries.map(([country, users]) => `  ${country}: ${users} users`).join('\n')}
 
-Provide your analysis in JSON format:
+Respond with JSON only:
 {
-  "summary": "brief 2-sentence overview",
+  "summary": "2-sentence overview",
   "topInsights": ["insight 1", "insight 2", "insight 3"],
   "seoRecommendations": ["rec 1", "rec 2", "rec 3", "rec 4"],
   "geographicOpportunities": "analysis of geographic data",
