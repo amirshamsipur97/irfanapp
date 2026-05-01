@@ -131,7 +131,7 @@ Reply ONLY with valid JSON (no markdown, no backticks):
     // ── 6. Call Claude ───────────────────────────────────────────
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1600,
+      max_tokens: 2200,
       messages: [{ role: 'user', content: prompt }],
     })
 
