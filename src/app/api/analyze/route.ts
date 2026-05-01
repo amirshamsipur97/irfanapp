@@ -122,11 +122,11 @@ export async function GET(req: NextRequest) {
 
     const prompt = `Analyze irfaninvest.com — Oman luxury real estate (ITC/freehold, UK/UAE/Qatar buyers).
 GA4: ${rows[rows.length - 1]?.date} to ${rows[0]?.date} | views=${totalPageViews} users28d=${totalUsers28} today=${totalActiveToday} events=${totalEvents} leads=${totalLeads}
-pages=${topPages.map(([p, v]) => `${p}:${v}`).join(',')}
-countries=${topCountries.map(([c, u]) => `${c}:${u}`).join(',')}${adsLine}
+pages=${topPages.slice(0,5).map(([p, v]) => `${p}:${v}`).join(',')}
+countries=${topCountries.slice(0,4).map(([c, u]) => `${c}:${u}`).join(',')}${adsLine}
 
-Reply ONLY with valid JSON (no markdown, no backticks):
-{"summary":"2-3 sentences","score":0,"topInsights":[{"title":"","detail":"","impact":"high"}],"seoRecommendations":[{"title":"","detail":"","priority":"high"}],"geographicOpportunities":"2 sentences","contentGaps":[{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"1 week","impact":"high"}],"metrics":{"conversionRate":0,"engagementScore":0,"internationalTraffic":0},"adsAnalysis":{"overallAssessment":"2 sentences","budgetEfficiency":"medium","topPerformingCampaign":"","weakestCampaign":"","recommendations":[{"title":"","detail":"","priority":"high"}],"costPerLeadAssessment":"1 sentence"}}`
+Reply ONLY with valid JSON, no markdown. Use EXACTLY this structure with adsAnalysis FIRST:
+{"adsAnalysis":{"overallAssessment":"2 sentences","budgetEfficiency":"high|medium|low","topPerformingCampaign":"name","weakestCampaign":"name","costPerLeadAssessment":"1 sentence","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"}]},"summary":"2-3 sentences","score":0,"topInsights":[{"title":"","detail":"","impact":"high|medium|low"},{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"medium"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"},{"title":"","detail":"","priority":"medium"}],"geographicOpportunities":"2 sentences","contentGaps":[{"topic":"","reason":""},{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h|1 week|1 month","impact":"high"},{"action":"","timeframe":"1 week","impact":"high"},{"action":"","timeframe":"1 month","impact":"medium"}],"metrics":{"conversionRate":0,"engagementScore":0,"internationalTraffic":0}}`
 
     // ── 6. Call Claude ───────────────────────────────────────────
     const message = await client.messages.create({
