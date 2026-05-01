@@ -49,6 +49,15 @@ interface ContentGap { topic: string; reason: string }
 interface PriorityAction { action: string; timeframe: string; impact: 'high'|'medium'|'low' }
 interface AnalysisMetrics { conversionRate: number; engagementScore: number; internationalTraffic: number }
 
+interface AdsAnalysis {
+  overallAssessment: string
+  budgetEfficiency: 'high' | 'medium' | 'low'
+  topPerformingCampaign: string
+  weakestCampaign: string
+  recommendations: Recommendation[]
+  costPerLeadAssessment: string
+}
+
 interface Analysis {
   summary: string
   score: number
@@ -58,6 +67,7 @@ interface Analysis {
   contentGaps: ContentGap[]
   priorityActions: PriorityAction[]
   metrics: AnalysisMetrics
+  adsAnalysis?: AdsAnalysis
 }
 interface AnalysisResponse { analysis: Analysis; snapshot: Record<string, unknown>; lastUpdated: string }
 
@@ -826,6 +836,67 @@ export default function Dashboard() {
                     <p className="text-sm text-[#e2e8f0] leading-relaxed">{analysis.geographicOpportunities}</p>
                   </div>
                 </div>
+
+                {/* Google Ads Analysis */}
+                {analysis.adsAnalysis && (
+                  <div className="space-y-4">
+                    {/* Ads header + overall */}
+                    <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5 border-t-2" style={{ borderTopColor: '#3b82f6' }}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-6 h-6 rounded-lg bg-blue-500/20 flex items-center justify-center text-sm">📢</div>
+                        <h4 className="text-xs font-bold uppercase tracking-widest text-[#3b82f6]">Google Ads Performance Analysis</h4>
+                        <span className={`ml-auto text-xs font-bold px-3 py-1 rounded-full ${
+                          analysis.adsAnalysis.budgetEfficiency === 'high'   ? 'bg-emerald-500/20 text-emerald-400' :
+                          analysis.adsAnalysis.budgetEfficiency === 'medium' ? 'bg-yellow-500/20 text-yellow-400'  :
+                                                                               'bg-red-500/20 text-red-400'
+                        }`}>
+                          {analysis.adsAnalysis.budgetEfficiency?.toUpperCase()} EFFICIENCY
+                        </span>
+                      </div>
+                      <p className="text-sm text-[#e2e8f0] leading-relaxed mb-4">{analysis.adsAnalysis.overallAssessment}</p>
+
+                      {/* Top / Weakest campaign */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
+                          <p className="text-[10px] uppercase tracking-widest text-emerald-400 font-bold mb-1">Top Performing</p>
+                          <p className="text-sm text-white font-semibold">{analysis.adsAnalysis.topPerformingCampaign}</p>
+                        </div>
+                        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                          <p className="text-[10px] uppercase tracking-widest text-red-400 font-bold mb-1">Needs Attention</p>
+                          <p className="text-sm text-white font-semibold">{analysis.adsAnalysis.weakestCampaign}</p>
+                        </div>
+                      </div>
+
+                      {/* Cost per lead */}
+                      <div className="mt-3 p-3 bg-[#0a0f1a] rounded-xl border-l-2 border-[#c9a84c]">
+                        <p className="text-[10px] uppercase tracking-widest text-[#c9a84c] font-bold mb-1">Cost Per Lead Assessment</p>
+                        <p className="text-xs text-[#e2e8f0] leading-relaxed">{analysis.adsAnalysis.costPerLeadAssessment}</p>
+                      </div>
+                    </div>
+
+                    {/* Ads recommendations */}
+                    {analysis.adsAnalysis.recommendations?.length > 0 && (
+                      <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                        <h4 className="text-xs font-bold uppercase tracking-widest text-[#3b82f6] mb-4">Google Ads Recommendations</h4>
+                        <div className="space-y-3">
+                          {analysis.adsAnalysis.recommendations.map((rec, i) => (
+                            <div key={i} className="flex gap-3 p-3 bg-[#0a0f1a] rounded-xl">
+                              <span className={`mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 h-fit ${
+                                rec.priority === 'urgent' ? 'bg-red-500/20 text-red-400' :
+                                rec.priority === 'high'   ? 'bg-orange-500/20 text-orange-400' :
+                                                           'bg-blue-500/20 text-blue-400'
+                              }`}>{rec.priority}</span>
+                              <div>
+                                <p className="text-sm font-semibold text-white mb-0.5">{rec.title}</p>
+                                <p className="text-xs text-[#8a9bbf] leading-relaxed">{rec.detail}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex justify-end">
                   <button onClick={runAnalysis} className="text-xs text-[#8a9bbf] hover:text-[#c9a84c] transition-colors flex items-center gap-1">
