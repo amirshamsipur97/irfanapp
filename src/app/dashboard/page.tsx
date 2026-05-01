@@ -126,7 +126,7 @@ export default function Dashboard() {
     setTab('ai')
     try {
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 55000)
+      const timeout = setTimeout(() => controller.abort(), 90000)
       const res = await fetch('/api/analyze', { signal: controller.signal })
       clearTimeout(timeout)
       if (!res.ok) throw new Error(`Server error: ${res.status}`)

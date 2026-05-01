@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { analyticsDb } from '@/lib/supabase'
 
+export const maxDuration = 60
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const CACHE_HOURS = 6
 
@@ -95,31 +97,23 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 5. Call Claude ────────────────────────────────────────────
-  const adsSection = ads.length > 0 ? `
+  const adsSection = ads.length > 0
+    ? `\nADS: spend=$${adsTotalSpend.toFixed(0)} clicks=${adsTotalClicks} impr=${adsTotalImpressions} CTR=${adsOverallCtr.toFixed(2)}% CPC=$${adsOverallCpc.toFixed(2)} CPL=$${adsCostPerLead.toFixed(0)} active=${enabledCampaigns.length} paused=${pausedCampaigns.length} channels=${channelBreakdown.join('|')} top=${topAdsBySpend.slice(0,3).join('|')}`
+    : '\nADS: no data'
 
-GOOGLE ADS DATA:
-- Total Spend: $${adsTotalSpend.toFixed(2)} | Total Clicks: ${adsTotalClicks.toLocaleString()} | Impressions: ${adsTotalImpressions.toLocaleString()}
-- Overall CTR: ${adsOverallCtr.toFixed(3)}% | Avg CPC: $${adsOverallCpc.toFixed(3)} | Video Views: ${adsTotalVideoViews.toLocaleString()}
-- Cost per Lead: $${adsCostPerLead.toFixed(2)} | Active Campaigns: ${enabledCampaigns.length} | Paused: ${pausedCampaigns.length}
-- Channel Spend: ${channelBreakdown.join(', ')}
-- Top Campaigns by Spend: ${topAdsBySpend.join(' | ')}` : '\nGOOGLE ADS DATA: Not available yet.'
+  const prompt = `Analyze irfaninvest.com — Oman luxury real estate (ITC/freehold, targeting UK/UAE/Qatar buyers).
 
-  const prompt = `You are an expert digital marketing analyst for luxury real estate. Analyze both GA4 website analytics AND Google Ads performance for irfaninvest.com — a luxury real estate investment website in Oman (ITC zones, freehold properties targeting UK, UAE, Qatar buyers).
-
-GA4 WEBSITE DATA:
-- Date Range: ${rows[rows.length-1]?.date} to ${rows[0]?.date}
-- Page Views: ${totalPageViews} | Active Users 28d: ${totalUsers28} | Active Today: ${totalActiveToday}
-- Events: ${totalEvents} | Leads Generated: ${totalLeads}
-- Top Pages: ${topPages.map(([p,v])=>`${p}(${v})`).join(', ')}
-- Top Countries: ${topCountries.map(([c,u])=>`${c}(${u})`).join(', ')}
+GA4: ${rows[rows.length-1]?.date} to ${rows[0]?.date} | views=${totalPageViews} users28d=${totalUsers28} today=${totalActiveToday} events=${totalEvents} leads=${totalLeads}
+pages=${topPages.map(([p,v])=>`${p}:${v}`).join(',')}
+countries=${topCountries.map(([c,u])=>`${c}:${u}`).join(',')}
 ${adsSection}
 
-Return ONLY valid JSON, no markdown, no code blocks:
-{"summary":"2-3 sentence executive summary covering both organic traffic and paid ads performance","score":<0-100>,"topInsights":[{"title":"","detail":"","impact":"high|medium|low"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}],"geographicOpportunities":"2-3 sentences about geographic targeting opportunities","contentGaps":[{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h|1 week|1 month","impact":"high|medium|low"}],"metrics":{"conversionRate":<number>,"engagementScore":<number>,"internationalTraffic":<integer>},"adsAnalysis":{"overallAssessment":"2-3 sentences on paid ads efficiency and ROI","budgetEfficiency":"high|medium|low","topPerformingCampaign":"campaign name","weakestCampaign":"campaign name","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}],"costPerLeadAssessment":"1-2 sentences on cost per lead performance"}}`
+Reply ONLY with this JSON (no markdown):
+{"summary":"2-3 sentences","score":<0-100>,"topInsights":[{"title":"","detail":"","impact":"high|medium|low"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}],"geographicOpportunities":"2 sentences","contentGaps":[{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h|1 week|1 month","impact":"high|medium|low"}],"metrics":{"conversionRate":<num>,"engagementScore":<num>,"internationalTraffic":<int>},"adsAnalysis":{"overallAssessment":"2 sentences","budgetEfficiency":"high|medium|low","topPerformingCampaign":"","weakestCampaign":"","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}],"costPerLeadAssessment":"1 sentence"}}`
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 2500,
+    max_tokens: 1800,
     messages: [{ role: 'user', content: prompt }],
   })
 
