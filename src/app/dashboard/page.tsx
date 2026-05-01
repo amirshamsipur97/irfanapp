@@ -23,7 +23,25 @@ interface GA4Row {
   synced_at?: string
 }
 
-interface GA4Store { lastUpdated: string; rows: GA4Row[] }
+interface AdsRow {
+  id?: number
+  date: string
+  campaign_id: string
+  campaign_name: string
+  campaign_status: string
+  clicks: number
+  impressions: number
+  cost: number
+  ctr: number
+  average_cpc: number
+  average_cpm: number
+  interaction_rate: number
+  video_views: number
+  advertising_channel_type: string
+  synced_at?: string
+}
+
+interface GA4Store { lastUpdated: string; rows: GA4Row[]; ads: AdsRow[] }
 
 interface Insight { title: string; detail: string; impact: 'high'|'medium'|'low' }
 interface Recommendation { title: string; detail: string; priority: 'urgent'|'high'|'medium' }
@@ -80,7 +98,7 @@ export default function Dashboard() {
   const [analysisResp, setAnalysisResp] = useState<AnalysisResponse | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'overview' | 'pages' | 'geo' | 'ai'>('overview')
+  const [tab, setTab] = useState<'overview' | 'pages' | 'geo' | 'ads' | 'ai'>('overview')
   const analysis = analysisResp?.analysis ?? null
 
   const loadData = () =>
@@ -123,6 +141,7 @@ export default function Dashboard() {
   )
 
   const rows = store.rows
+  const ads  = store.ads ?? []
   const hasData = rows.length > 0
 
   // ── Aggregations ──────────────────────────────────────────────
@@ -210,7 +229,7 @@ export default function Dashboard() {
 
         {/* ── Tabs ── */}
         <div className="flex gap-1 bg-[#0f1629] border border-[#1e2d4a] rounded-xl p-1 w-fit">
-          {(['overview', 'pages', 'geo', 'ai'] as const).map(t => (
+          {(['overview', 'pages', 'geo', 'ads', 'ai'] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -220,7 +239,11 @@ export default function Dashboard() {
                   : 'text-[#8a9bbf] hover:text-white'
               }`}
             >
-              {t === 'ai' ? '✦ AI Insights' : t === 'overview' ? 'Overview' : t === 'pages' ? 'Top Pages' : 'Geography'}
+              {t === 'ai' ? '✦ AI Insights'
+               : t === 'overview' ? 'Overview'
+               : t === 'pages' ? 'Top Pages'
+               : t === 'geo' ? 'Geography'
+               : '📢 Google Ads'}
             </button>
           ))}
         </div>
@@ -363,6 +386,134 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── Google Ads Tab ── */}
+        {tab === 'ads' && (
+          <div className="space-y-4">
+            {ads.length === 0 ? (
+              <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl flex flex-col items-center py-16 gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-[#1e2d4a] flex items-center justify-center text-3xl">📢</div>
+                <p className="text-white font-semibold">No Google Ads data yet</p>
+                <p className="text-[#8a9bbf] text-sm text-center max-w-sm px-4">
+                  Send campaign data via n8n to <span className="font-mono text-[#c9a84c]">/api/webhook/google-ads</span>
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Ads KPI summary */}
+                {(() => {
+                  const totalClicks      = ads.reduce((s, r) => s + r.clicks, 0)
+                  const totalImpressions = ads.reduce((s, r) => s + r.impressions, 0)
+                  const totalCost        = ads.reduce((s, r) => s + Number(r.cost), 0)
+                  const totalViews       = ads.reduce((s, r) => s + r.video_views, 0)
+                  const avgCtr           = ads.length ? ads.reduce((s, r) => s + Number(r.ctr), 0) / ads.length : 0
+                  const avgCpc           = ads.length ? ads.reduce((s, r) => s + Number(r.average_cpc), 0) / ads.length : 0
+                  const avgCpm           = ads.length ? ads.reduce((s, r) => s + Number(r.average_cpm), 0) / ads.length : 0
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                      {[
+                        { label: 'Total Clicks',      value: totalClicks.toLocaleString(),          color: 'text-[#c9a84c]' },
+                        { label: 'Impressions',        value: totalImpressions >= 1000 ? `${(totalImpressions/1000).toFixed(1)}k` : totalImpressions.toLocaleString(), color: 'text-white' },
+                        { label: 'Total Cost',         value: `$${totalCost.toFixed(2)}`,            color: 'text-[#f43f5e]' },
+                        { label: 'Video Views',        value: totalViews.toLocaleString(),            color: 'text-[#8b5cf6]' },
+                        { label: 'Avg CTR',            value: `${(avgCtr * 100).toFixed(2)}%`,       color: 'text-[#22c55e]' },
+                        { label: 'Avg CPC',            value: `$${avgCpc.toFixed(3)}`,               color: 'text-[#3b82f6]' },
+                        { label: 'Avg CPM',            value: `$${avgCpm.toFixed(2)}`,               color: 'text-[#0d9488]' },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-4 flex flex-col gap-1">
+                          <p className="text-[#8a9bbf] text-[10px] uppercase tracking-widest font-medium leading-tight">{label}</p>
+                          <p className={`text-xl font-bold ${color}`}>{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+
+                {/* Campaign table */}
+                <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-4">Campaign Performance</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[#8a9bbf] uppercase tracking-wider border-b border-[#1e2d4a]">
+                          <th className="text-left pb-3 pr-4 font-medium">Campaign</th>
+                          <th className="text-left pb-3 pr-4 font-medium">Channel</th>
+                          <th className="text-left pb-3 pr-4 font-medium">Status</th>
+                          <th className="text-right pb-3 pr-4 font-medium">Clicks</th>
+                          <th className="text-right pb-3 pr-4 font-medium">Impressions</th>
+                          <th className="text-right pb-3 pr-4 font-medium">Cost</th>
+                          <th className="text-right pb-3 pr-4 font-medium">CTR</th>
+                          <th className="text-right pb-3 pr-4 font-medium">CPC</th>
+                          <th className="text-right pb-3 font-medium">CPM</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ads.map((row, i) => {
+                          const statusColor =
+                            row.campaign_status === 'ENABLED'  ? 'bg-emerald-500/20 text-emerald-400' :
+                            row.campaign_status === 'PAUSED'   ? 'bg-yellow-500/20 text-yellow-400'  :
+                            row.campaign_status === 'REMOVED'  ? 'bg-red-500/20 text-red-400'        :
+                                                                 'bg-[#1e2d4a] text-[#8a9bbf]'
+                          return (
+                            <tr key={i} className="border-b border-[#1e2d4a]/50 last:border-0 hover:bg-[#0a0f1a]/50 transition-colors">
+                              <td className="py-3 pr-4">
+                                <p className="text-white font-medium truncate max-w-[160px]" title={row.campaign_name}>
+                                  {row.campaign_name || row.campaign_id}
+                                </p>
+                                <p className="text-[#8a9bbf] text-[10px] mt-0.5">{row.campaign_id}</p>
+                              </td>
+                              <td className="py-3 pr-4">
+                                <span className="text-[#8a9bbf] bg-[#1e2d4a] px-2 py-0.5 rounded-full text-[10px]">
+                                  {row.advertising_channel_type}
+                                </span>
+                              </td>
+                              <td className="py-3 pr-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColor}`}>
+                                  {row.campaign_status}
+                                </span>
+                              </td>
+                              <td className="py-3 pr-4 text-right text-white font-semibold">{row.clicks.toLocaleString()}</td>
+                              <td className="py-3 pr-4 text-right text-[#8a9bbf]">{row.impressions.toLocaleString()}</td>
+                              <td className="py-3 pr-4 text-right text-[#f43f5e] font-medium">${Number(row.cost).toFixed(2)}</td>
+                              <td className="py-3 pr-4 text-right text-[#22c55e]">{(Number(row.ctr) * 100).toFixed(2)}%</td>
+                              <td className="py-3 pr-4 text-right text-[#3b82f6]">${Number(row.average_cpc).toFixed(3)}</td>
+                              <td className="py-3 text-right text-[#0d9488]">${Number(row.average_cpm).toFixed(2)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Clicks bar chart */}
+                <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-4">Clicks vs Impressions by Campaign</h3>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart
+                      data={ads.map(r => ({
+                        name: (r.campaign_name || r.campaign_id).slice(0, 18),
+                        Clicks: r.clicks,
+                        Impressions: r.impressions,
+                      }))}
+                      margin={{ left: 0, right: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e2d4a" />
+                      <XAxis dataKey="name" tick={{ fill: '#8a9bbf', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fill: '#8a9bbf', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        contentStyle={{ background: '#0a0f1a', border: '1px solid #1e2d4a', borderRadius: 12, fontSize: 12 }}
+                        cursor={{ fill: '#1e2d4a' }}
+                      />
+                      <Bar dataKey="Clicks"      fill={GOLD}  radius={[4,4,0,0]} maxBarSize={32} />
+                      <Bar dataKey="Impressions" fill={BLUE}  radius={[4,4,0,0]} maxBarSize={32} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
           </div>
         )}
 

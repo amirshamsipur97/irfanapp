@@ -16,3 +16,21 @@ export interface GA4Row {
   checkouts: number
   page_views: number
 }
+
+export interface AdsRow {
+  id?: number
+  date: string
+  campaign_id: string
+  campaign_name: string
+  campaign_status: string
+  clicks: number
+  impressions: number
+  cost: number
+  ctr: number
+  average_cpc: number
+  average_cpm: number
+  interaction_rate: number
+  video_views: number
+  advertising_channel_type: string
+  synced_at?: string
+}
