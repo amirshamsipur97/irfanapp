@@ -390,132 +390,277 @@ export default function Dashboard() {
         )}
 
         {/* ── Google Ads Tab ── */}
-        {tab === 'ads' && (
-          <div className="space-y-4">
-            {ads.length === 0 ? (
-              <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl flex flex-col items-center py-16 gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-[#1e2d4a] flex items-center justify-center text-3xl">📢</div>
-                <p className="text-white font-semibold">No Google Ads data yet</p>
-                <p className="text-[#8a9bbf] text-sm text-center max-w-sm px-4">
-                  Send campaign data via n8n to <span className="font-mono text-[#c9a84c]">/api/webhook/google-ads</span>
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* Ads KPI summary */}
-                {(() => {
-                  const totalClicks      = ads.reduce((s, r) => s + r.clicks, 0)
-                  const totalImpressions = ads.reduce((s, r) => s + r.impressions, 0)
-                  const totalCost        = ads.reduce((s, r) => s + Number(r.cost), 0)
-                  const totalViews       = ads.reduce((s, r) => s + r.video_views, 0)
-                  const avgCtr           = ads.length ? ads.reduce((s, r) => s + Number(r.ctr), 0) / ads.length : 0
-                  const avgCpc           = ads.length ? ads.reduce((s, r) => s + Number(r.average_cpc), 0) / ads.length : 0
-                  const avgCpm           = ads.length ? ads.reduce((s, r) => s + Number(r.average_cpm), 0) / ads.length : 0
-                  return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-                      {[
-                        { label: 'Total Clicks',      value: totalClicks.toLocaleString(),          color: 'text-[#c9a84c]' },
-                        { label: 'Impressions',        value: totalImpressions >= 1000 ? `${(totalImpressions/1000).toFixed(1)}k` : totalImpressions.toLocaleString(), color: 'text-white' },
-                        { label: 'Total Cost',         value: `$${totalCost.toFixed(2)}`,            color: 'text-[#f43f5e]' },
-                        { label: 'Video Views',        value: totalViews.toLocaleString(),            color: 'text-[#8b5cf6]' },
-                        { label: 'Avg CTR',            value: `${(avgCtr * 100).toFixed(2)}%`,       color: 'text-[#22c55e]' },
-                        { label: 'Avg CPC',            value: `$${avgCpc.toFixed(3)}`,               color: 'text-[#3b82f6]' },
-                        { label: 'Avg CPM',            value: `$${avgCpm.toFixed(2)}`,               color: 'text-[#0d9488]' },
-                      ].map(({ label, value, color }) => (
-                        <div key={label} className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-4 flex flex-col gap-1">
-                          <p className="text-[#8a9bbf] text-[10px] uppercase tracking-widest font-medium leading-tight">{label}</p>
-                          <p className={`text-xl font-bold ${color}`}>{value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
+        {tab === 'ads' && (() => {
+          if (ads.length === 0) return (
+            <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl flex flex-col items-center py-16 gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#1e2d4a] flex items-center justify-center text-3xl">📢</div>
+              <p className="text-white font-semibold">No Google Ads data yet</p>
+              <p className="text-[#8a9bbf] text-sm text-center max-w-sm px-4">
+                Send campaign data via n8n to <span className="font-mono text-[#c9a84c]">/api/webhook/google-ads</span>
+              </p>
+            </div>
+          )
 
-                {/* Campaign table */}
+          // ── Pre-compute ───────────────────────────────────────────
+          const totalClicks      = ads.reduce((s, r) => s + Number(r.clicks), 0)
+          const totalImpressions = ads.reduce((s, r) => s + Number(r.impressions), 0)
+          const totalCost        = ads.reduce((s, r) => s + Number(r.cost), 0)
+          const totalVideoViews  = ads.reduce((s, r) => s + Number(r.video_views), 0)
+          const overallCtr       = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0
+          const overallCpc       = totalClicks > 0 ? totalCost / totalClicks : 0
+          const overallCpm       = totalImpressions > 0 ? (totalCost / totalImpressions) * 1000 : 0
+
+          // Cost by campaign — sorted desc, top 10
+          const costByCampaign = [...ads]
+            .filter(r => Number(r.cost) > 0)
+            .sort((a, b) => Number(b.cost) - Number(a.cost))
+            .slice(0, 10)
+            .map(r => ({
+              name: (r.campaign_name || r.campaign_id).slice(0, 26),
+              cost: Number(r.cost),
+              status: r.campaign_status,
+            }))
+
+          // CTR by campaign — only campaigns with impressions
+          const ctrByChannel = [...ads]
+            .filter(r => Number(r.impressions) > 0)
+            .sort((a, b) => Number(b.ctr) - Number(a.ctr))
+            .slice(0, 8)
+            .map(r => ({
+              name: (r.campaign_name || r.campaign_id).slice(0, 22),
+              ctr: parseFloat((Number(r.ctr) * 100).toFixed(3)),
+              channel: r.advertising_channel_type,
+            }))
+
+          // Channel type breakdown by cost
+          const channelCost = Object.entries(
+            ads.reduce((acc: Record<string, number>, r) => {
+              const ch = r.advertising_channel_type || 'OTHER'
+              acc[ch] = (acc[ch] || 0) + Number(r.cost)
+              return acc
+            }, {})
+          ).map(([name, value]) => ({ name, value: parseFloat(value.toFixed(2)) }))
+            .sort((a, b) => b.value - a.value)
+
+          const CHANNEL_COLORS: Record<string, string> = {
+            VIDEO: '#8b5cf6', SEARCH: '#3b82f6', DEMAND_GEN: '#c9a84c', OTHER: '#0d9488'
+          }
+
+          // Status counts
+          const statusCount = ads.reduce((acc: Record<string, number>, r) => {
+            acc[r.campaign_status] = (acc[r.campaign_status] || 0) + 1
+            return acc
+          }, {})
+
+          const fmtK = (n: number) => n >= 1000000 ? `${(n/1000000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(1)}k` : n.toLocaleString()
+
+          return (
+            <div className="space-y-4">
+
+              {/* ── KPI Row ── */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {[
+                  { label: 'Total Spend',    value: `$${totalCost.toFixed(0)}`,        color: 'text-[#f43f5e]' },
+                  { label: 'Total Clicks',   value: fmtK(totalClicks),                 color: 'text-[#c9a84c]' },
+                  { label: 'Impressions',    value: fmtK(totalImpressions),             color: 'text-white' },
+                  { label: 'Video Views',    value: fmtK(totalVideoViews),              color: 'text-[#8b5cf6]' },
+                  { label: 'Avg CTR',        value: `${overallCtr.toFixed(2)}%`,        color: 'text-[#22c55e]' },
+                  { label: 'Avg CPC',        value: `$${overallCpc.toFixed(2)}`,        color: 'text-[#3b82f6]' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-4">
+                    <p className="text-[#8a9bbf] text-[10px] uppercase tracking-widest font-medium mb-1">{label}</p>
+                    <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Status badges + CPM ── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Campaign status cards */}
                 <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
-                  <h3 className="text-sm font-semibold text-white mb-4">Campaign Performance</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-[#8a9bbf] uppercase tracking-wider border-b border-[#1e2d4a]">
-                          <th className="text-left pb-3 pr-4 font-medium">Campaign</th>
-                          <th className="text-left pb-3 pr-4 font-medium">Channel</th>
-                          <th className="text-left pb-3 pr-4 font-medium">Status</th>
-                          <th className="text-right pb-3 pr-4 font-medium">Clicks</th>
-                          <th className="text-right pb-3 pr-4 font-medium">Impressions</th>
-                          <th className="text-right pb-3 pr-4 font-medium">Cost</th>
-                          <th className="text-right pb-3 pr-4 font-medium">CTR</th>
-                          <th className="text-right pb-3 pr-4 font-medium">CPC</th>
-                          <th className="text-right pb-3 font-medium">CPM</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ads.map((row, i) => {
-                          const statusColor =
-                            row.campaign_status === 'ENABLED'  ? 'bg-emerald-500/20 text-emerald-400' :
-                            row.campaign_status === 'PAUSED'   ? 'bg-yellow-500/20 text-yellow-400'  :
-                            row.campaign_status === 'REMOVED'  ? 'bg-red-500/20 text-red-400'        :
-                                                                 'bg-[#1e2d4a] text-[#8a9bbf]'
-                          return (
-                            <tr key={i} className="border-b border-[#1e2d4a]/50 last:border-0 hover:bg-[#0a0f1a]/50 transition-colors">
-                              <td className="py-3 pr-4">
-                                <p className="text-white font-medium truncate max-w-[160px]" title={row.campaign_name}>
-                                  {row.campaign_name || row.campaign_id}
-                                </p>
-                                <p className="text-[#8a9bbf] text-[10px] mt-0.5">{row.campaign_id}</p>
-                              </td>
-                              <td className="py-3 pr-4">
-                                <span className="text-[#8a9bbf] bg-[#1e2d4a] px-2 py-0.5 rounded-full text-[10px]">
-                                  {row.advertising_channel_type}
-                                </span>
-                              </td>
-                              <td className="py-3 pr-4">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColor}`}>
-                                  {row.campaign_status}
-                                </span>
-                              </td>
-                              <td className="py-3 pr-4 text-right text-white font-semibold">{row.clicks.toLocaleString()}</td>
-                              <td className="py-3 pr-4 text-right text-[#8a9bbf]">{row.impressions.toLocaleString()}</td>
-                              <td className="py-3 pr-4 text-right text-[#f43f5e] font-medium">${Number(row.cost).toFixed(2)}</td>
-                              <td className="py-3 pr-4 text-right text-[#22c55e]">{(Number(row.ctr) * 100).toFixed(2)}%</td>
-                              <td className="py-3 pr-4 text-right text-[#3b82f6]">${Number(row.average_cpc).toFixed(3)}</td>
-                              <td className="py-3 text-right text-[#0d9488]">${Number(row.average_cpm).toFixed(2)}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[#8a9bbf] mb-4">Campaign Status</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {Object.entries(statusCount).map(([status, count]) => {
+                      const cfg: Record<string, {bg:string;text:string;dot:string}> = {
+                        ENABLED:  { bg:'bg-emerald-500/10', text:'text-emerald-400', dot:'bg-emerald-400' },
+                        PAUSED:   { bg:'bg-yellow-500/10',  text:'text-yellow-400',  dot:'bg-yellow-400'  },
+                        REMOVED:  { bg:'bg-red-500/10',     text:'text-red-400',     dot:'bg-red-400'     },
+                      }
+                      const c = cfg[status] ?? { bg:'bg-[#1e2d4a]', text:'text-[#8a9bbf]', dot:'bg-[#8a9bbf]' }
+                      return (
+                        <div key={status} className={`flex items-center gap-2 px-4 py-3 rounded-xl ${c.bg}`}>
+                          <span className={`w-2 h-2 rounded-full ${c.dot}`}/>
+                          <span className={`text-sm font-semibold ${c.text}`}>{count}</span>
+                          <span className="text-xs text-[#8a9bbf]">{status}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-[#1e2d4a] flex items-center justify-between text-xs">
+                    <span className="text-[#8a9bbf]">Avg CPM</span>
+                    <span className="text-[#0d9488] font-bold text-base">${overallCpm.toFixed(2)}</span>
                   </div>
                 </div>
 
-                {/* Clicks bar chart */}
+                {/* Channel breakdown */}
                 <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
-                  <h3 className="text-sm font-semibold text-white mb-4">Clicks vs Impressions by Campaign</h3>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart
-                      data={ads.map(r => ({
-                        name: (r.campaign_name || r.campaign_id).slice(0, 18),
-                        Clicks: r.clicks,
-                        Impressions: r.impressions,
-                      }))}
-                      margin={{ left: 0, right: 0 }}
-                    >
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[#8a9bbf] mb-4">Spend by Channel</h3>
+                  <div className="flex gap-4 items-center">
+                    <ResponsiveContainer width={130} height={130}>
+                      <PieChart>
+                        <Pie data={channelCost} dataKey="value" cx="50%" cy="50%" outerRadius={58} innerRadius={32} paddingAngle={3}>
+                          {channelCost.map((entry, i) => (
+                            <Cell key={i} fill={CHANNEL_COLORS[entry.name] ?? PIE_COLORS[i % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ background: '#0a0f1a', border: '1px solid #1e2d4a', borderRadius: 10, fontSize: 11 }}
+                          formatter={(v: number) => [`$${v.toFixed(2)}`, 'Spend']}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-2">
+                      {channelCost.map((entry) => {
+                        const pct = totalCost > 0 ? (entry.value / totalCost) * 100 : 0
+                        const color = CHANNEL_COLORS[entry.name] ?? '#8a9bbf'
+                        return (
+                          <div key={entry.name}>
+                            <div className="flex justify-between text-xs mb-0.5">
+                              <span className="font-medium" style={{ color }}>{entry.name}</span>
+                              <span className="text-[#8a9bbf]">${entry.value.toFixed(0)}</span>
+                            </div>
+                            <div className="h-1 bg-[#1e2d4a] rounded-full">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Cost by Campaign (horizontal bar) ── */}
+              <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-1">Ad Spend by Campaign</h3>
+                <p className="text-[#8a9bbf] text-xs mb-4">Top 10 campaigns sorted by total cost</p>
+                <ResponsiveContainer width="100%" height={Math.max(240, costByCampaign.length * 38)}>
+                  <BarChart data={costByCampaign} layout="vertical" margin={{ left: 4, right: 40, top: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2d4a" horizontal={false} />
+                    <XAxis type="number" tick={{ fill: '#8a9bbf', fontSize: 10 }} tickLine={false} axisLine={false}
+                      tickFormatter={(v) => `$${v}`} />
+                    <YAxis dataKey="name" type="category" width={170} tick={{ fill: '#e2e8f0', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <Tooltip
+                      contentStyle={{ background: '#0a0f1a', border: '1px solid #1e2d4a', borderRadius: 12, fontSize: 12 }}
+                      cursor={{ fill: '#1e2d4a33' }}
+                      formatter={(v: number) => [`$${v.toFixed(2)}`, 'Cost']}
+                    />
+                    <Bar dataKey="cost" radius={[0, 6, 6, 0]} maxBarSize={22}>
+                      {costByCampaign.map((entry, i) => (
+                        <Cell key={i} fill={
+                          entry.status === 'ENABLED' ? '#22c55e' :
+                          entry.status === 'PAUSED'  ? GOLD       : '#f43f5e'
+                        } />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="flex items-center gap-4 mt-3 text-[10px] text-[#8a9bbf]">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#22c55e] inline-block"/>ENABLED</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#c9a84c] inline-block"/>PAUSED</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#f43f5e] inline-block"/>REMOVED</span>
+                </div>
+              </div>
+
+              {/* ── CTR by Campaign ── */}
+              {ctrByChannel.length > 0 && (
+                <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">CTR by Campaign</h3>
+                  <p className="text-[#8a9bbf] text-xs mb-4">Click-through rate % — campaigns with impressions only</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={ctrByChannel} margin={{ left: 0, right: 8, top: 0, bottom: 40 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e2d4a" />
-                      <XAxis dataKey="name" tick={{ fill: '#8a9bbf', fontSize: 10 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fill: '#8a9bbf', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <XAxis dataKey="name" tick={{ fill: '#8a9bbf', fontSize: 9 }} tickLine={false} axisLine={false}
+                        angle={-35} textAnchor="end" interval={0} />
+                      <YAxis tick={{ fill: '#8a9bbf', fontSize: 10 }} tickLine={false} axisLine={false}
+                        tickFormatter={(v) => `${v}%`} />
                       <Tooltip
                         contentStyle={{ background: '#0a0f1a', border: '1px solid #1e2d4a', borderRadius: 12, fontSize: 12 }}
-                        cursor={{ fill: '#1e2d4a' }}
+                        cursor={{ fill: '#1e2d4a33' }}
+                        formatter={(v: number) => [`${v.toFixed(3)}%`, 'CTR']}
                       />
-                      <Bar dataKey="Clicks"      fill={GOLD}  radius={[4,4,0,0]} maxBarSize={32} />
-                      <Bar dataKey="Impressions" fill={BLUE}  radius={[4,4,0,0]} maxBarSize={32} />
+                      <Bar dataKey="ctr" radius={[4, 4, 0, 0]} maxBarSize={28}>
+                        {ctrByChannel.map((entry, i) => (
+                          <Cell key={i} fill={CHANNEL_COLORS[entry.channel] ?? PIE_COLORS[i % PIE_COLORS.length]} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              </>
-            )}
-          </div>
-        )}
+              )}
+
+              {/* ── Full Campaign Table ── */}
+              <div className="bg-[#0f1629] border border-[#1e2d4a] rounded-2xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-4">All Campaigns</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-[#8a9bbf] uppercase tracking-wider border-b border-[#1e2d4a]">
+                        <th className="text-left pb-3 pr-3 font-medium">Campaign</th>
+                        <th className="text-left pb-3 pr-3 font-medium">Type</th>
+                        <th className="text-left pb-3 pr-3 font-medium">Status</th>
+                        <th className="text-right pb-3 pr-3 font-medium">Clicks</th>
+                        <th className="text-right pb-3 pr-3 font-medium">Impr.</th>
+                        <th className="text-right pb-3 pr-3 font-medium">Cost</th>
+                        <th className="text-right pb-3 pr-3 font-medium">CTR</th>
+                        <th className="text-right pb-3 pr-3 font-medium">CPC</th>
+                        <th className="text-right pb-3 font-medium">CPM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...ads].sort((a, b) => Number(b.cost) - Number(a.cost)).map((row, i) => {
+                        const statusCls =
+                          row.campaign_status === 'ENABLED' ? 'bg-emerald-500/20 text-emerald-400' :
+                          row.campaign_status === 'PAUSED'  ? 'bg-yellow-500/20 text-yellow-400'   :
+                          row.campaign_status === 'REMOVED' ? 'bg-red-500/20 text-red-400'         :
+                                                              'bg-[#1e2d4a] text-[#8a9bbf]'
+                        return (
+                          <tr key={i} className="border-b border-[#1e2d4a]/50 last:border-0 hover:bg-[#0a0f1a]/60 transition-colors">
+                            <td className="py-3 pr-3">
+                              <p className="text-white font-medium max-w-[140px] truncate" title={row.campaign_name}>
+                                {row.campaign_name || row.campaign_id}
+                              </p>
+                              <p className="text-[#8a9bbf] text-[10px] mt-0.5 font-mono">{row.campaign_id}</p>
+                            </td>
+                            <td className="py-3 pr-3">
+                              <span className="px-2 py-0.5 rounded-full text-[10px]"
+                                style={{ background: `${CHANNEL_COLORS[row.advertising_channel_type] ?? '#8a9bbf'}22`,
+                                         color: CHANNEL_COLORS[row.advertising_channel_type] ?? '#8a9bbf' }}>
+                                {row.advertising_channel_type}
+                              </span>
+                            </td>
+                            <td className="py-3 pr-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusCls}`}>
+                                {row.campaign_status}
+                              </span>
+                            </td>
+                            <td className="py-3 pr-3 text-right text-white font-semibold">{Number(row.clicks).toLocaleString()}</td>
+                            <td className="py-3 pr-3 text-right text-[#8a9bbf]">{fmtK(Number(row.impressions))}</td>
+                            <td className="py-3 pr-3 text-right text-[#f43f5e] font-medium">${Number(row.cost).toFixed(2)}</td>
+                            <td className="py-3 pr-3 text-right text-[#22c55e]">{(Number(row.ctr) * 100).toFixed(2)}%</td>
+                            <td className="py-3 pr-3 text-right text-[#3b82f6]">${Number(row.average_cpc).toFixed(3)}</td>
+                            <td className="py-3 text-right text-[#0d9488]">${Number(row.average_cpm).toFixed(2)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          )
+        })()}
 
         {/* ── AI Tab ── */}
         {tab === 'ai' && (
