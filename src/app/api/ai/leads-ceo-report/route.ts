@@ -56,34 +56,34 @@ export async function POST(req: NextRequest) {
     const leadsToday    = leads.filter(l => (l.inserted_at ?? '').slice(0, 10) === today).length
 
     // ── 3. Build prompt ──────────────────────────────────────────────────
-    const prompt = `تو یک مشاور تجاری ارشد هستی که باید یک گزارش فارسی ساده و غیرفنی برای مدیرعامل یک شرکت مشاور سرمایه‌گذاری ملکی در عمان (irfaninvest.com) تهیه کنی.
+    const prompt = `You are a senior business advisor preparing a concise, non-technical executive report for the CEO of irfaninvest.com — a luxury real estate investment consultancy in Oman (ITC zones, freehold properties targeting UK, UAE, Qatar buyers).
 
-داده‌های لید امروز:
-- کل لیدها: ${total} نفر
-- لیدهای داغ/عالی: ${hot} نفر
-- لیدهای گرم: ${warm} نفر
-- لیدهای سرد: ${cold} نفر
-- لیدهای نامعتبر: ${invalid} نفر
-- میانگین امتیاز: ${avgScore} از ۱۰۰
-- لیدهای با نیت خرید بالا: ${highIntent} نفر
-- لیدهای امروز: ${leadsToday} نفر
-- کشورهای برتر: ${topCountries}
-- علاقه‌مندی ملکی: ${topProperties}
-${hotLeadSummaries ? `- خلاصه لیدهای مهم: ${hotLeadSummaries}` : ''}
+Current leads data:
+- Total leads: ${total}
+- Hot/High quality: ${hot}
+- Warm: ${warm}
+- Cold: ${cold}
+- Invalid: ${invalid}
+- Average score: ${avgScore}/100
+- High buyer intent: ${highIntent}
+- New leads today: ${leadsToday}
+- Top countries: ${topCountries}
+- Property interests: ${topProperties}
+${hotLeadSummaries ? `- Priority lead summaries: ${hotLeadSummaries}` : ''}
 
-گزارش فارسی را با این ساختار بنویس (ONLY return JSON, no markdown):
+Return ONLY valid JSON (no markdown):
 {
-  "executive_summary": "۲-۳ جمله خلاصه وضعیت کلی به فارسی ساده",
-  "quality_analysis": "تحلیل ۲-۳ جمله‌ای از کیفیت لیدها به فارسی",
-  "priority_leads": "توضیح ۱-۲ جمله‌ای درباره کدام لیدها مهم‌تر هستند",
-  "sales_action": "چه کاری تیم فروش باید فوری انجام دهد (۱-۲ جمله)",
+  "executive_summary": "2-3 sentence plain-English overview of the current lead pipeline",
+  "quality_analysis": "2-3 sentence analysis of lead quality and what it means for the business",
+  "priority_leads": "1-2 sentences on which leads deserve immediate attention and why",
+  "sales_action": "1-2 sentences on what the sales team must do right now",
   "immediate_actions": [
-    {"action": "اقدام اول", "reason": "دلیل", "timeframe": "امروز/۲۴ ساعت/این هفته"},
-    {"action": "اقدام دوم", "reason": "دلیل", "timeframe": "۴۸ ساعت"},
-    {"action": "اقدام سوم", "reason": "دلیل", "timeframe": "این هفته"}
+    {"action": "First action", "reason": "Why this matters", "timeframe": "Today"},
+    {"action": "Second action", "reason": "Why this matters", "timeframe": "Within 48h"},
+    {"action": "Third action", "reason": "Why this matters", "timeframe": "This week"}
   ],
-  "market_insight": "یک بینش مختصر درباره بازار هدف بر اساس این لیدها",
-  "score_interpretation": "توضیح ساده درباره معنی امتیاز میانگین ${avgScore}"
+  "market_insight": "One insight about the target market based on this lead data",
+  "score_interpretation": "Plain-language explanation of what the average score of ${avgScore}/100 means for conversions"
 }`
 
     // ── 4. Call Claude ───────────────────────────────────────────────────
