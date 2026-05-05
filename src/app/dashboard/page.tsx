@@ -56,6 +56,14 @@ interface AdsAnalysis {
   recommendations: Recommendation[]
   costPerLeadAssessment: string
 }
+interface LeadsOpportunity { title: string; detail: string; impact: 'high'|'medium'|'low' }
+interface LeadsAnalysis {
+  funnelAssessment: string
+  qualityBreakdown: string
+  topOpportunities: LeadsOpportunity[]
+  sourceEffectiveness: string
+  crossChannelInsight: string
+}
 interface Analysis {
   summary: string
   score: number
@@ -66,6 +74,7 @@ interface Analysis {
   priorityActions: PriorityAction[]
   metrics: AnalysisMetrics
   adsAnalysis?: AdsAnalysis
+  leadsAnalysis?: LeadsAnalysis
 }
 interface AnalysisResponse { analysis: Analysis; snapshot: Record<string, unknown>; lastUpdated: string }
 
@@ -1260,6 +1269,71 @@ export default function Dashboard() {
                               <div>
                                 <p className="text-sm font-semibold text-white mb-0.5">{rec.title}</p>
                                 <p className="text-xs text-white/40 leading-relaxed">{rec.detail}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Leads Funnel Analysis ── */}
+                {analysis.leadsAnalysis && (
+                  <div className="space-y-4">
+                    {/* Header card */}
+                    <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6"
+                      style={{ borderTopColor: GREEN, borderTopWidth: 2 }}>
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-base">👥</span>
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: GREEN }}>
+                          Leads CRM Analysis
+                        </h4>
+                      </div>
+
+                      {/* Funnel + Quality */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="p-4 bg-white/[0.03] rounded-xl border border-white/[0.06]">
+                          <p className="text-[10px] text-green-400 font-bold uppercase tracking-widest mb-2">Full Funnel Assessment</p>
+                          <p className="text-sm text-white/75 leading-relaxed">{analysis.leadsAnalysis.funnelAssessment}</p>
+                        </div>
+                        <div className="p-4 bg-white/[0.03] rounded-xl border border-white/[0.06]">
+                          <p className="text-[10px] text-yellow-400 font-bold uppercase tracking-widest mb-2">Lead Quality Breakdown</p>
+                          <p className="text-sm text-white/75 leading-relaxed">{analysis.leadsAnalysis.qualityBreakdown}</p>
+                        </div>
+                      </div>
+
+                      {/* Source effectiveness */}
+                      <div className="p-4 bg-white/[0.03] rounded-xl border-l-2 border border-white/[0.06] mb-4"
+                        style={{ borderLeftColor: TEAL }}>
+                        <p className="text-[10px] text-teal-400 font-bold uppercase tracking-widest mb-2">Source Effectiveness</p>
+                        <p className="text-sm text-white/75 leading-relaxed">{analysis.leadsAnalysis.sourceEffectiveness}</p>
+                      </div>
+
+                      {/* Cross-channel insight */}
+                      <div className="p-4 rounded-xl border border-purple-500/20"
+                        style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.06), rgba(168,85,247,0.04))' }}>
+                        <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-2">🔗 Cross-Channel Insight</p>
+                        <p className="text-sm text-white/80 leading-relaxed">{analysis.leadsAnalysis.crossChannelInsight}</p>
+                      </div>
+                    </div>
+
+                    {/* Top opportunities */}
+                    {analysis.leadsAnalysis.topOpportunities?.length > 0 && (
+                      <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest mb-4" style={{ color: GREEN }}>
+                          Lead Opportunities
+                        </h4>
+                        <div className="space-y-3">
+                          {analysis.leadsAnalysis.topOpportunities.map((opp, i) => (
+                            <div key={i} className="flex gap-3 p-3 bg-white/[0.03] rounded-xl border border-white/[0.04]">
+                              <span className={`mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 h-fit ${
+                                opp.impact === 'high'   ? 'bg-green-500/20 text-green-400'  :
+                                opp.impact === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'
+                              }`}>{opp.impact}</span>
+                              <div>
+                                <p className="text-sm font-semibold text-white mb-0.5">{opp.title}</p>
+                                <p className="text-xs text-white/40 leading-relaxed">{opp.detail}</p>
                               </div>
                             </div>
                           ))}
