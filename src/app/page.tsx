@@ -6,6 +6,13 @@ const imgIcon = "https://www.figma.com/api/mcp/asset/5cb5eaa6-15fe-4b76-8fe1-263
 export default function SplashScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-100">
+      {/* Analytics Dashboard shortcut */}
+      <a href="/dashboard"
+        className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-lg hover:scale-105 transition-all"
+        style={{ background: 'linear-gradient(135deg, #7C3AED, #A855F7)' }}>
+        <span>📊</span> Analytics Dashboard
+      </a>
+
       <div className="bg-[#a259ff] h-[896px] overflow-hidden relative w-[414px]">
         {/* Background */}
         <div className="absolute h-[975px] left-[-195px] top-[-251px] w-[1032px]">

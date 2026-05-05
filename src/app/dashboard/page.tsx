@@ -69,6 +69,30 @@ interface Analysis {
 }
 interface AnalysisResponse { analysis: Analysis; snapshot: Record<string, unknown>; lastUpdated: string }
 
+// ── Leads interfaces ──────────────────────────────────────────────────────────
+interface Lead {
+  id: number; lead_id: string | null; full_name: string | null; email: string | null
+  phone: string | null; country: string | null; city: string | null
+  property_interest: string | null; budget: string | null; lead_quality: string | null
+  lead_score: number | null; buyer_intent: string | null; status: string | null
+  recommended_next_action: string | null; short_summary: string | null
+  source_sheet: string | null; campaign_source: string | null; language: string | null
+  utm_source: string | null; utm_medium: string | null; utm_campaign: string | null
+  preferred_location: string | null; message: string | null
+  created_at: string | null; inserted_at: string | null
+}
+interface LeadsStore { leads: Lead[]; total: number; page: number; totalPages: number }
+interface CeoImmediateAction { action: string; reason: string; timeframe: string }
+interface CeoReport {
+  executive_summary: string; quality_analysis: string; priority_leads: string
+  sales_action: string; immediate_actions: CeoImmediateAction[]
+  market_insight: string; score_interpretation: string
+}
+interface CeoReportResponse {
+  report: CeoReport; generatedAt: string
+  stats: { total: number; hot: number; warm: number; cold: number; avgScore: string; highIntent: number; leadsToday: number }
+}
+
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const PURPLE      = '#8B5CF6'
 const GOLD        = '#F59E0B'
@@ -120,17 +144,65 @@ export default function Dashboard() {
   const [analysisResp, setAnalysisResp] = useState<AnalysisResponse | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [analysisError, setAnalysisError]     = useState<string | null>(null)
-  const [tab, setTab] = useState<'overview'|'pages'|'geo'|'ads'|'ai'>('overview')
+  const [tab, setTab] = useState<'overview'|'pages'|'geo'|'ads'|'ai'|'leads'>('overview')
   const analysis = analysisResp?.analysis ?? null
+
+  // ── Leads state ─────────────────────────────────────────────────────────────
+  const [leadsStore, setLeadsStore]       = useState<LeadsStore | null>(null)
+  const [leadsLoading, setLeadsLoading]   = useState(false)
+  const [leadsError, setLeadsError]       = useState<string | null>(null)
+  const [leadsPage, setLeadsPage]         = useState(1)
+  const [leadsSearch, setLeadsSearch]     = useState('')
+  const [leadsQuality, setLeadsQuality]   = useState('')
+  const [leadsCountry, setLeadsCountry]   = useState('')
+  const [leadsProperty, setLeadsProperty] = useState('')
+  const [leadsSheet, setLeadsSheet]       = useState('')
+  const [expandedLead, setExpandedLead]   = useState<number | null>(null)
+  const [ceoReport, setCeoReport]         = useState<CeoReportResponse | null>(null)
+  const [ceoLoading, setCeoLoading]       = useState(false)
+  const [ceoError, setCeoError]           = useState<string | null>(null)
+  const [showCeo, setShowCeo]             = useState(false)
 
   const loadData = () =>
     fetch('/api/data').then(r => r.json()).then((d: GA4Store) => setStore(d))
+
+  const loadLeads = (p = 1) => {
+    setLeadsLoading(true); setLeadsError(null)
+    const params = new URLSearchParams({ page: String(p), limit: '40' })
+    if (leadsSearch)   params.set('search', leadsSearch)
+    if (leadsQuality)  params.set('quality', leadsQuality)
+    if (leadsCountry)  params.set('country', leadsCountry)
+    if (leadsProperty) params.set('property', leadsProperty)
+    if (leadsSheet)    params.set('source_sheet', leadsSheet)
+    fetch(`/api/leads?${params}`)
+      .then(r => r.json())
+      .then((d: LeadsStore) => { setLeadsStore(d); setLeadsPage(p) })
+      .catch(e => setLeadsError(e.message))
+      .finally(() => setLeadsLoading(false))
+  }
+
+  const runCeoReport = async () => {
+    setCeoLoading(true); setCeoError(null); setShowCeo(true)
+    try {
+      const res = await fetch('/api/ai/leads-ceo-report', { method: 'POST' })
+      const d = await res.json()
+      if (d.error) throw new Error(d.error)
+      setCeoReport(d)
+    } catch (e) {
+      setCeoError(e instanceof Error ? e.message : 'Failed')
+    } finally { setCeoLoading(false) }
+  }
 
   useEffect(() => {
     loadData()
     const iv = setInterval(loadData, 5 * 60 * 1000)
     return () => clearInterval(iv)
   }, [])
+
+  useEffect(() => {
+    if (tab === 'leads') loadLeads(1)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, leadsSearch, leadsQuality, leadsCountry, leadsProperty, leadsSheet])
 
   const runAnalysis = async () => {
     setLoadingAnalysis(true)
@@ -213,6 +285,7 @@ export default function Dashboard() {
     { id: 'pages',    label: 'Top Pages' },
     { id: 'geo',      label: 'Geography' },
     { id: 'ads',      label: '📢 Google Ads' },
+    { id: 'leads',    label: '👥 Leads CRM' },
     { id: 'ai',       label: '✦ AI Insights' },
   ] as const
 
@@ -691,6 +764,263 @@ export default function Dashboard() {
                   </table>
                 </div>
               </div>
+            </div>
+          )
+        })()}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            LEADS CRM TAB
+        ════════════════════════════════════════════════════════════════════ */}
+        {tab === 'leads' && (() => {
+          const leads       = leadsStore?.leads ?? []
+          const leadsTotal  = leadsStore?.total ?? 0
+          const hotCount    = leads.filter(l => ['hot','high'].includes((l.lead_quality ?? '').toLowerCase())).length
+          const warmCount   = leads.filter(l => (l.lead_quality ?? '').toLowerCase() === 'warm').length
+          const coldCount   = leads.filter(l => (l.lead_quality ?? '').toLowerCase() === 'cold').length
+          const scores      = leads.map(l => Number(l.lead_score)).filter(n => !isNaN(n) && n > 0)
+          const avgScore    = scores.length ? (scores.reduce((s, n) => s + n, 0) / scores.length).toFixed(0) : '0'
+          const today       = new Date().toISOString().slice(0, 10)
+          const todayCount  = leads.filter(l => (l.inserted_at ?? '').slice(0, 10) === today).length
+
+          const qStyle = (q: string | null) => {
+            const map: Record<string, { bg: string; text: string; label: string }> = {
+              hot:     { bg: 'bg-orange-500/15 border border-orange-500/30', text: 'text-orange-400', label: 'Hot'     },
+              high:    { bg: 'bg-red-500/15 border border-red-500/30',       text: 'text-red-400',    label: 'High'    },
+              warm:    { bg: 'bg-yellow-500/15 border border-yellow-500/30', text: 'text-yellow-400', label: 'Warm'    },
+              cold:    { bg: 'bg-blue-500/15 border border-blue-500/30',     text: 'text-blue-400',   label: 'Cold'    },
+              invalid: { bg: 'bg-white/5 border border-white/10',            text: 'text-white/30',   label: 'Invalid' },
+            }
+            return map[(q ?? '').toLowerCase()] ?? { bg: 'bg-white/5 border border-white/10', text: 'text-white/40', label: q ?? '—' }
+          }
+          const scoreColor = (s: number | null) => !s ? 'text-white/30' : s >= 70 ? 'text-orange-400' : s >= 40 ? 'text-yellow-400' : 'text-blue-400'
+          const fmtDate = (d: string | null) => !d ? '—' : new Date(d).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+
+          return (
+            <div className="space-y-4">
+
+              {/* KPIs */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <KpiCard label="Total Leads"  value={String(leadsTotal)} sub="All sources"       accent={PURPLE} />
+                <KpiCard label="Hot / High"   value={String(hotCount)}   sub="Top priority"      accent="#F97316" />
+                <KpiCard label="Warm"         value={String(warmCount)}  sub="Follow up needed"  accent={GOLD}   />
+                <KpiCard label="Cold"         value={String(coldCount)}  sub="Needs nurturing"   accent={BLUE}   />
+                <KpiCard label="Avg Score"    value={avgScore}           sub="Out of 100"         accent={GREEN}  />
+                <KpiCard label="Today"        value={String(todayCount)} sub="New leads"          accent="#A855F7" />
+              </div>
+
+              {/* CEO Report */}
+              <div className="flex justify-end">
+                <button onClick={runCeoReport} disabled={ceoLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40 transition-all hover:scale-105"
+                  style={{ background: 'linear-gradient(135deg, #7C3AED, #A855F7)' }}>
+                  {ceoLoading ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Analyzing…</> : <>✦ CEO Report</>}
+                </button>
+              </div>
+
+              {showCeo && (
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl overflow-hidden" style={{ borderTopColor: PURPLE, borderTopWidth: 2 }}>
+                  <div className="p-4 flex items-center justify-between border-b border-white/[0.06]">
+                    <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">✦ AI CEO Report</span>
+                    <button onClick={() => setShowCeo(false)} className="text-white/20 hover:text-white/50 transition-colors text-xl leading-none">×</button>
+                  </div>
+                  {ceoLoading && <div className="flex items-center justify-center py-12 gap-4"><div className="w-10 h-10 border-2 border-t-purple-500 border-purple-500/20 rounded-full animate-spin" /><p className="text-white/40 text-sm">Analyzing leads…</p></div>}
+                  {ceoError && !ceoLoading && <div className="p-5 text-center"><p className="text-red-400 text-sm">{ceoError}</p></div>}
+                  {ceoReport && !ceoLoading && (
+                    <div className="p-5 space-y-4">
+                      <div className="grid grid-cols-4 gap-3">
+                        {[{ l:'Total', v: ceoReport.stats.total, c: PURPLE }, { l:'Hot/High', v: ceoReport.stats.hot, c:'#F97316' }, { l:'Warm', v: ceoReport.stats.warm, c: GOLD }, { l:'Avg Score', v: ceoReport.stats.avgScore, c: GREEN }].map(({ l, v, c }) => (
+                          <div key={l} className="bg-white/[0.03] rounded-xl p-3 text-center border border-white/[0.05]">
+                            <p className="text-xl font-bold" style={{ color: c }}>{v}</p>
+                            <p className="text-[10px] text-white/30 uppercase tracking-wider mt-0.5">{l}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="p-4 bg-purple-500/5 border border-purple-500/15 rounded-xl">
+                        <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-2">Executive Summary</p>
+                        <p className="text-white/80 text-sm leading-relaxed">{ceoReport.report.executive_summary}</p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="p-4 bg-white/[0.03] rounded-xl border border-white/[0.06]">
+                          <p className="text-[10px] text-yellow-400 font-bold uppercase tracking-widest mb-2">Quality Analysis</p>
+                          <p className="text-white/70 text-sm leading-relaxed">{ceoReport.report.quality_analysis}</p>
+                        </div>
+                        <div className="p-4 bg-white/[0.03] rounded-xl border border-white/[0.06]">
+                          <p className="text-[10px] text-orange-400 font-bold uppercase tracking-widest mb-2">Priority Leads</p>
+                          <p className="text-white/70 text-sm leading-relaxed">{ceoReport.report.priority_leads}</p>
+                        </div>
+                      </div>
+                      <div className="p-4 bg-white/[0.03] rounded-xl border-l-2 border border-white/[0.06]" style={{ borderLeftColor: GREEN }}>
+                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-widest mb-2">Sales Team — Action</p>
+                        <p className="text-white/70 text-sm leading-relaxed">{ceoReport.report.sales_action}</p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {ceoReport.report.immediate_actions?.map((a, i) => (
+                          <div key={i} className="bg-white/[0.03] rounded-xl p-4 border-t-2 border border-white/[0.05]"
+                            style={{ borderTopColor: i === 0 ? RED : i === 1 ? GOLD : PURPLE }}>
+                            <span className="text-[10px] bg-white/[0.05] border border-white/10 rounded-full px-2 py-0.5 text-white/40">{a.timeframe}</span>
+                            <p className="text-sm text-white/80 leading-relaxed mt-2 mb-1">{a.action}</p>
+                            <p className="text-xs text-white/35">{a.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Filters */}
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-2xl p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                  <div className="xl:col-span-2 relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 text-xs">🔍</span>
+                    <input type="text" placeholder="Search name, email, phone…" value={leadsSearch} onChange={e => setLeadsSearch(e.target.value)}
+                      className="w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-2.5 pl-8 text-sm text-white placeholder-white/25 focus:outline-none focus:border-purple-500/50 transition-colors" />
+                  </div>
+                  <select value={leadsQuality} onChange={e => setLeadsQuality(e.target.value)}
+                    className="bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white/70 focus:outline-none focus:border-purple-500/50 transition-colors">
+                    <option value="">All Qualities</option>
+                    <option value="hot">🔥 Hot</option>
+                    <option value="high">⭐ High</option>
+                    <option value="warm">🌡 Warm</option>
+                    <option value="cold">❄️ Cold</option>
+                    <option value="invalid">✗ Invalid</option>
+                  </select>
+                  <input type="text" placeholder="🌍 Country" value={leadsCountry} onChange={e => setLeadsCountry(e.target.value)}
+                    className="bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/25 focus:outline-none focus:border-purple-500/50 transition-colors" />
+                  <input type="text" placeholder="📋 Source sheet" value={leadsSheet} onChange={e => setLeadsSheet(e.target.value)}
+                    className="bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/25 focus:outline-none focus:border-purple-500/50 transition-colors" />
+                  <button onClick={() => { setLeadsSearch(''); setLeadsQuality(''); setLeadsCountry(''); setLeadsProperty(''); setLeadsSheet('') }}
+                    className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white/40 hover:text-white/70 transition-colors">
+                    Clear filters
+                  </button>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl overflow-hidden">
+                <div className="p-5 border-b border-white/[0.06] flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">All Leads</h3>
+                    <p className="text-white/30 text-xs mt-0.5">{leadsTotal.toLocaleString()} leads found</p>
+                  </div>
+                  {leadsStore && leadsStore.totalPages > 1 && (
+                    <span className="text-xs text-white/30">Page {leadsPage} of {leadsStore.totalPages}</span>
+                  )}
+                </div>
+
+                {leadsLoading && (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="relative w-10 h-10">
+                      <div className="absolute inset-0 rounded-full border-2 border-purple-500/20" />
+                      <div className="absolute inset-0 rounded-full border-2 border-t-purple-500 animate-spin" />
+                    </div>
+                  </div>
+                )}
+
+                {leadsError && !leadsLoading && (
+                  <div className="flex flex-col items-center py-12 gap-3">
+                    <p className="text-red-400 text-sm">{leadsError}</p>
+                    <button onClick={() => loadLeads(leadsPage)} className="text-xs text-white/30 hover:text-white/60 transition-colors">Retry</button>
+                  </div>
+                )}
+
+                {!leadsLoading && !leadsError && leads.length === 0 && (
+                  <div className="flex flex-col items-center py-16 gap-3">
+                    <span className="text-3xl">📭</span>
+                    <p className="text-white/30 text-sm">No leads found</p>
+                  </div>
+                )}
+
+                {!leadsLoading && !leadsError && leads.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-white/[0.06]">
+                          {['Name','Phone','Email','Country','Property','Budget','Quality','Score','Next Action','Created'].map(h => (
+                            <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold text-white/30 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {leads.map(lead => {
+                          const qs = qStyle(lead.lead_quality)
+                          const isExp = expandedLead === lead.id
+                          return (
+                            <>
+                              <tr key={lead.id} className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer transition-colors"
+                                onClick={() => setExpandedLead(isExp ? null : lead.id)}>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <p className="text-white font-medium">{lead.full_name || '—'}</p>
+                                  {lead.city && <p className="text-white/25 text-[10px]">{lead.city}</p>}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap"><span className="font-mono text-white/55">{lead.phone || '—'}</span></td>
+                                <td className="px-4 py-3 max-w-[160px]"><span className="text-white/55 truncate block">{lead.email || '—'}</span></td>
+                                <td className="px-4 py-3 whitespace-nowrap text-white/55">{lead.country || '—'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-white/55">{lead.property_interest || '—'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap max-w-[100px]"><span className="text-white/40 truncate block">{lead.budget || '—'}</span></td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${qs.bg} ${qs.text}`}>{qs.label}</span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`text-base font-bold ${scoreColor(lead.lead_score)}`}>{lead.lead_score ?? '—'}</span>
+                                </td>
+                                <td className="px-4 py-3 max-w-[200px]">
+                                  <p className="text-white/40 text-[10px] leading-relaxed line-clamp-2">{lead.recommended_next_action || '—'}</p>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-white/30 text-[10px]">{fmtDate(lead.inserted_at)}</td>
+                              </tr>
+                              {isExp && (
+                                <tr key={`${lead.id}-exp`} className="bg-white/[0.02] border-b border-white/[0.04]">
+                                  <td colSpan={10} className="px-6 py-5">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {lead.short_summary && (
+                                        <div className="p-3 bg-purple-500/5 border border-purple-500/15 rounded-xl">
+                                          <p className="text-[10px] text-purple-400 font-bold uppercase tracking-wider mb-1.5">AI Summary</p>
+                                          <p className="text-white/65 text-xs leading-relaxed">{lead.short_summary}</p>
+                                        </div>
+                                      )}
+                                      {lead.recommended_next_action && (
+                                        <div className="p-3 bg-green-500/5 border border-green-500/15 rounded-xl">
+                                          <p className="text-[10px] text-green-400 font-bold uppercase tracking-wider mb-1.5">Recommended Action</p>
+                                          <p className="text-white/65 text-xs leading-relaxed">{lead.recommended_next_action}</p>
+                                        </div>
+                                      )}
+                                      <div className="p-3 bg-white/[0.03] border border-white/[0.06] rounded-xl">
+                                        <p className="text-[10px] text-white/30 font-bold uppercase tracking-wider mb-2">Additional Details</p>
+                                        <div className="grid grid-cols-2 gap-1.5 text-xs">
+                                          {([['Buyer Intent', lead.buyer_intent], ['Status', lead.status], ['Language', lead.language], ['Campaign', lead.campaign_source], ['UTM Source', lead.utm_source], ['Location', lead.preferred_location]] as [string, string | null][]).filter(([, v]) => v).map(([k, v]) => (
+                                            <div key={k}><span className="text-white/25">{k}: </span><span className="text-white/60">{v}</span></div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {!leadsLoading && leadsStore && leadsStore.totalPages > 1 && (
+                  <div className="p-4 border-t border-white/[0.06] flex items-center justify-between">
+                    <button onClick={() => loadLeads(leadsPage - 1)} disabled={leadsPage <= 1}
+                      className="px-4 py-2 rounded-xl text-xs font-medium bg-white/[0.05] border border-white/[0.08] text-white/50 hover:text-white/80 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                      ← Previous
+                    </button>
+                    <span className="text-xs text-white/30">Page {leadsPage} of {leadsStore.totalPages}</span>
+                    <button onClick={() => loadLeads(leadsPage + 1)} disabled={leadsPage >= leadsStore.totalPages}
+                      className="px-4 py-2 rounded-xl text-xs font-medium bg-white/[0.05] border border-white/[0.08] text-white/50 hover:text-white/80 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                      Next →
+                    </button>
+                  </div>
+                )}
+              </div>
+
             </div>
           )
         })()}
