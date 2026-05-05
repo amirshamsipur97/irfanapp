@@ -8,14 +8,42 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const CACHE_HOURS = 6
 
 function parseJSON(text: string): Record<string, unknown> | null {
-  const clean = text.replace(/^```(?:json)?\s*/im, '').replace(/\s*```$/m, '').trim()
+  // Strip ALL markdown code fences (``` or ```json), including leading whitespace
+  const clean = text
+    .replace(/^\s*```(?:json|JSON)?\s*\n?/gm, '')
+    .replace(/\n?\s*```\s*$/gm, '')
+    .trim()
+
+  // Try direct parse
   try { return JSON.parse(clean) } catch { /* fall through */ }
-  const m = clean.match(/\{[\s\S]*\}/)
-  if (m) {
-    try { return JSON.parse(m[0]) } catch { /* fall through */ }
-    const truncated = m[0].replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/, '') + '}'
-    try { return JSON.parse(truncated) } catch { /* give up */ }
+
+  // Extract the outermost { ... } block (greedy — gets the whole object)
+  const start = clean.indexOf('{')
+  if (start === -1) return null
+  const raw = clean.slice(start)
+
+  // Walk chars to find matching close brace
+  let depth = 0; let end = -1
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === '{') depth++
+    else if (raw[i] === '}') { depth--; if (depth === 0) { end = i; break } }
   }
+
+  const candidate = end !== -1 ? raw.slice(0, end + 1) : raw
+  try { return JSON.parse(candidate) } catch { /* fall through */ }
+
+  // Last resort: trim incomplete last value and close all open structures
+  const trimmed = candidate
+    .replace(/,\s*$/, '')                          // trailing comma
+    .replace(/,?\s*"[^"]*"\s*:\s*[^,}\]]*$/, '')  // incomplete last key-value
+    .replace(/,?\s*"[^"]*"?\s*$/, '')              // incomplete last key
+  const openBraces  = (trimmed.match(/\{/g) ?? []).length
+  const closeBraces = (trimmed.match(/\}/g) ?? []).length
+  const openBracks  = (trimmed.match(/\[/g) ?? []).length
+  const closeBracks = (trimmed.match(/\]/g) ?? []).length
+  const closed = trimmed + ']'.repeat(Math.max(0, openBracks - closeBracks)) + '}'.repeat(Math.max(0, openBraces - closeBraces))
+  try { return JSON.parse(closed) } catch { /* give up */ }
+
   return null
 }
 
@@ -181,8 +209,8 @@ Property interests: ${topProperties.join(', ')}
 Lead sources: ${topLeadSources.join(', ')}
 UTM campaigns: ${topUTM.join(', ')}
 
-Reply ONLY with valid JSON (no markdown). leadsAnalysis FIRST to avoid truncation:
-{"leadsAnalysis":{"funnelAssessment":"2 sentences on the full funnel: Ads spend → website traffic → lead capture quality","qualityBreakdown":"2 sentences on lead quality distribution and what it means","topOpportunities":[{"title":"","detail":"","impact":"high|medium|low"},{"title":"","detail":"","impact":"high"}],"sourceEffectiveness":"which sources/sheets generate best leads","crossChannelInsight":"1-2 sentences connecting GA4 traffic patterns with lead quality"},"adsAnalysis":{"overallAssessment":"2 sentences","budgetEfficiency":"high|medium|low","topPerformingCampaign":"name","weakestCampaign":"name","costPerLeadAssessment":"1 sentence","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"}]},"summary":"2-3 sentences covering all three channels","score":0,"topInsights":[{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"medium"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"},{"title":"","detail":"","priority":"medium"}],"geographicOpportunities":"2 sentences","contentGaps":[{"topic":"","reason":""},{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h","impact":"high"},{"action":"","timeframe":"1 week","impact":"high"},{"action":"","timeframe":"1 month","impact":"medium"}],"metrics":{"conversionRate":0,"engagementScore":0,"internationalTraffic":0}}`
+Return ONLY raw JSON (absolutely no markdown, no backticks, no code blocks — raw JSON only). Start your response with { and end with }:
+{"leadsAnalysis":{"funnelAssessment":"2 sentences","qualityBreakdown":"2 sentences","topOpportunities":[{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"high"}],"sourceEffectiveness":"1 sentence","crossChannelInsight":"1-2 sentences"},"adsAnalysis":{"overallAssessment":"2 sentences","budgetEfficiency":"high|medium|low","topPerformingCampaign":"","weakestCampaign":"","costPerLeadAssessment":"1 sentence","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}]},"summary":"2-3 sentences","score":0,"topInsights":[{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"medium"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"}],"geographicOpportunities":"2 sentences","contentGaps":[{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h","impact":"high"},{"action":"","timeframe":"1 week","impact":"high"},{"action":"","timeframe":"1 month","impact":"medium"}],"metrics":{"conversionRate":0,"engagementScore":0,"internationalTraffic":0}}`
 
     // ── 7. Call Claude ───────────────────────────────────────────
     const message = await client.messages.create({
