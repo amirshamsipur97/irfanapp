@@ -44,10 +44,17 @@ export async function POST(req: NextRequest) {
       return s
     }
     const num  = (v: unknown) => (v != null && v !== '' ? Number(v) : null)
-    const date = (v: unknown) => {
-      if (!v) return null
+
+    // Validates a timestamp and returns a safe ISO string.
+    // Rejects: null/empty, NaN dates, years outside 2000–2100.
+    // Falls back to now() so Postgres never sees an invalid timestamptz.
+    const safeDate = (v: unknown, fallbackToNow = true): string | null => {
+      if (v == null || v === '') return fallbackToNow ? new Date().toISOString() : null
       const d = new Date(String(v))
-      return isNaN(d.getTime()) ? null : d.toISOString()
+      if (isNaN(d.getTime())) return fallbackToNow ? new Date().toISOString() : null
+      const yr = d.getUTCFullYear()
+      if (yr < 2000 || yr > 2100) return fallbackToNow ? new Date().toISOString() : null
+      return d.toISOString()
     }
     // Try multiple field name variants — return first non-null value
     const pick = (...keys: unknown[]) => keys.map(k => str(k)).find(v => v != null) ?? null
@@ -79,13 +86,26 @@ export async function POST(req: NextRequest) {
       recommended_next_action:  pick(r.recommended_next_action, r.nextAction, r.next_action),
       short_summary:            str(r.short_summary ?? r.summary),
       suggested_email_reply:    str(r.suggested_email_reply ?? r.emailReply ?? r.suggested_reply),
-      created_at:               date(r.created_at ?? r.createdAt ?? r.date ?? r.timestamp),
+      created_at:               safeDate(r.created_at ?? r.createdAt ?? r.date ?? r.timestamp),
       raw_data:                 r,
     }
   })
 
-  // ── 4. Upsert into Supabase ───────────────────────────────────────────────
-  // Insert in batches of 100 to stay within Supabase limits
+  // ── 4. Track date-cleaning stats ──────────────────────────────────────────
+  let dateCleaned = 0
+  rows.forEach((row, i) => {
+    const raw = rawRows[i]
+    const originalDate = raw?.created_at ?? raw?.createdAt ?? raw?.date ?? raw?.timestamp
+    if (originalDate != null && originalDate !== '') {
+      const d = new Date(String(originalDate))
+      if (isNaN(d.getTime()) || d.getUTCFullYear() < 2000 || d.getUTCFullYear() > 2100) {
+        dateCleaned++
+        console.warn(`[leads webhook] Invalid date cleaned for row ${i}: "${originalDate}" → now()`)
+      }
+    }
+  })
+
+  // ── 5. Insert into Supabase in batches of 100 ─────────────────────────────
   const BATCH = 100
   let inserted = 0
 
@@ -94,14 +114,22 @@ export async function POST(req: NextRequest) {
     const { error } = await analyticsDb.from('leads').insert(batch)
     if (error) {
       console.error(`[leads webhook] Supabase insert error (batch ${i}–${i + batch.length}):`, error.message)
-      return NextResponse.json(
-        { error: `Database insert failed: ${error.message}` },
-        { status: 500 }
-      )
+      return NextResponse.json({
+        success: false,
+        error: `Database insert failed: ${error.message}`,
+        inserted,
+        failed: rows.length - inserted,
+        dateCleaned,
+      }, { status: 500 })
     }
     inserted += batch.length
   }
 
-  console.log(`[leads webhook] ✅ Inserted ${inserted} leads successfully`)
-  return NextResponse.json({ success: true, count: inserted })
+  console.log(`[leads webhook] ✅ Inserted ${inserted} leads (${dateCleaned} dates cleaned)`)
+  return NextResponse.json({
+    success: true,
+    count: inserted,
+    dateCleaned,
+    ...(dateCleaned > 0 && { note: `${dateCleaned} record(s) had invalid created_at — replaced with current timestamp` }),
+  })
 }
