@@ -209,13 +209,13 @@ Property interests: ${topProperties.join(', ')}
 Lead sources: ${topLeadSources.join(', ')}
 UTM campaigns: ${topUTM.join(', ')}
 
-Return ONLY raw JSON (absolutely no markdown, no backticks, no code blocks — raw JSON only). Start your response with { and end with }:
-{"leadsAnalysis":{"funnelAssessment":"2 sentences","qualityBreakdown":"2 sentences","topOpportunities":[{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"high"}],"sourceEffectiveness":"1 sentence","crossChannelInsight":"1-2 sentences"},"adsAnalysis":{"overallAssessment":"2 sentences","budgetEfficiency":"high|medium|low","topPerformingCampaign":"","weakestCampaign":"","costPerLeadAssessment":"1 sentence","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}]},"summary":"2-3 sentences","score":0,"topInsights":[{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"medium"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"}],"geographicOpportunities":"2 sentences","contentGaps":[{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h","impact":"high"},{"action":"","timeframe":"1 week","impact":"high"},{"action":"","timeframe":"1 month","impact":"medium"}],"metrics":{"conversionRate":0,"engagementScore":0,"internationalTraffic":0}}`
+Return ONLY raw JSON. No markdown. No backticks. Start with { end with }. Keep ALL values SHORT (1 sentence max per field):
+{"leadsAnalysis":{"funnelAssessment":"1 sentence","qualityBreakdown":"1 sentence","topOpportunities":[{"title":"","detail":"","impact":"high"}],"sourceEffectiveness":"1 sentence","crossChannelInsight":"1 sentence"},"adsAnalysis":{"overallAssessment":"1 sentence","budgetEfficiency":"high|medium|low","topPerformingCampaign":"","weakestCampaign":"","costPerLeadAssessment":"1 sentence","recommendations":[{"title":"","detail":"","priority":"urgent|high|medium"}]},"summary":"2 sentences max","score":0,"topInsights":[{"title":"","detail":"","impact":"high"},{"title":"","detail":"","impact":"medium"}],"seoRecommendations":[{"title":"","detail":"","priority":"urgent|high|medium"},{"title":"","detail":"","priority":"high"}],"geographicOpportunities":"1 sentence","contentGaps":[{"topic":"","reason":""}],"priorityActions":[{"action":"","timeframe":"48h","impact":"high"},{"action":"","timeframe":"1 week","impact":"high"},{"action":"","timeframe":"1 month","impact":"medium"}],"metrics":{"conversionRate":0,"engagementScore":0,"internationalTraffic":0}}`
 
     // ── 7. Call Claude ───────────────────────────────────────────
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2500,
+      max_tokens: 1800,
       messages: [{ role: 'user', content: prompt }],
     })
 
