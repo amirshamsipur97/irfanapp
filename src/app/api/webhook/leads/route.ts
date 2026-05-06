@@ -91,7 +91,27 @@ export async function POST(req: NextRequest) {
     }
   })
 
-  // ── 4. Track date-cleaning stats ──────────────────────────────────────────
+  // ── 4. Compute dedup_key for each row (must match Supabase UNIQUE INDEX) ─
+  const computeDedupKey = (email: string | null, phone: string | null): string | null => {
+    if (email && email.trim()) return 'E:' + email.trim().toLowerCase()
+    if (phone && phone.trim()) {
+      const digits = phone.replace(/[^0-9]/g, '')
+      if (digits.length >= 4) return 'P:' + digits.slice(-8)
+    }
+    return null  // No contact info — let DB insert without dedup
+  }
+
+  type LeadRow = typeof rows[0] & { dedup_key: string | null }
+  const rowsWithKey: LeadRow[] = rows.map(r => ({
+    ...r,
+    dedup_key: computeDedupKey(r.email, r.phone),
+  }))
+
+  // Split: rows with dedup_key (upsert) vs rows without (plain insert)
+  const withKey = rowsWithKey.filter(r => r.dedup_key !== null)
+  const noKey   = rowsWithKey.filter(r => r.dedup_key === null)
+
+  // ── 5. Track date-cleaning stats ──────────────────────────────────────────
   let dateCleaned = 0
   rows.forEach((row, i) => {
     const raw = rawRows[i]
@@ -100,36 +120,67 @@ export async function POST(req: NextRequest) {
       const d = new Date(String(originalDate))
       if (isNaN(d.getTime()) || d.getUTCFullYear() < 2000 || d.getUTCFullYear() > 2100) {
         dateCleaned++
-        console.warn(`[leads webhook] Invalid date cleaned for row ${i}: "${originalDate}" → now()`)
       }
     }
   })
 
-  // ── 5. Insert into Supabase in batches of 100 ─────────────────────────────
-  const BATCH = 100
-  let inserted = 0
+  // ── 6. Deduplicate WITHIN payload (same key may appear from multiple sheets) ──
+  const seen = new Map<string, LeadRow>()
+  for (const row of withKey) {
+    const existing = seen.get(row.dedup_key!)
+    if (!existing) { seen.set(row.dedup_key!, row); continue }
+    // Prefer row with quality data
+    const existingHasQuality = existing.lead_quality && existing.lead_quality !== 'unknown'
+    const newHasQuality      = row.lead_quality && row.lead_quality !== 'unknown'
+    if (newHasQuality && !existingHasQuality) seen.set(row.dedup_key!, row)
+    else if (newHasQuality === existingHasQuality && Number(row.lead_score ?? 0) > Number(existing.lead_score ?? 0)) {
+      seen.set(row.dedup_key!, row)
+    }
+  }
+  const dedupedWithKey = Array.from(seen.values())
 
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const batch = rows.slice(i, i + BATCH)
-    const { error } = await analyticsDb.from('leads').insert(batch)
+  // ── 7. Upsert keyed rows + insert no-key rows ─────────────────────────────
+  const BATCH = 100
+  let upserted = 0
+  let skipped  = 0
+
+  for (let i = 0; i < dedupedWithKey.length; i += BATCH) {
+    const batch = dedupedWithKey.slice(i, i + BATCH)
+    const { error, count } = await analyticsDb
+      .from('leads')
+      .upsert(batch, { onConflict: 'dedup_key', ignoreDuplicates: false, count: 'exact' })
     if (error) {
-      console.error(`[leads webhook] Supabase insert error (batch ${i}–${i + batch.length}):`, error.message)
+      console.error('[leads webhook] Upsert error:', error.message)
       return NextResponse.json({
-        success: false,
-        error: `Database insert failed: ${error.message}`,
-        inserted,
-        failed: rows.length - inserted,
-        dateCleaned,
+        success: false, error: `Database upsert failed: ${error.message}`,
+        upserted, skipped, dateCleaned,
       }, { status: 500 })
     }
-    inserted += batch.length
+    upserted += count ?? batch.length
   }
 
-  console.log(`[leads webhook] ✅ Inserted ${inserted} leads (${dateCleaned} dates cleaned)`)
+  for (let i = 0; i < noKey.length; i += BATCH) {
+    const batch = noKey.slice(i, i + BATCH)
+    const { error } = await analyticsDb.from('leads').insert(batch)
+    if (error) {
+      console.error('[leads webhook] Insert no-contact error:', error.message)
+      return NextResponse.json({
+        success: false, error: `No-contact insert failed: ${error.message}`,
+        upserted, dateCleaned,
+      }, { status: 500 })
+    }
+    upserted += batch.length
+  }
+
+  skipped = withKey.length - dedupedWithKey.length
+
+  console.log(`[leads webhook] ✅ Upserted=${upserted} | Skipped duplicates in payload=${skipped} | Date cleaned=${dateCleaned}`)
   return NextResponse.json({
     success: true,
-    count: inserted,
+    count: upserted,
+    skipped,
     dateCleaned,
-    ...(dateCleaned > 0 && { note: `${dateCleaned} record(s) had invalid created_at — replaced with current timestamp` }),
+    received: rows.length,
+    note: skipped > 0 ? `${skipped} duplicate(s) in payload merged into latest version` : undefined,
   })
 }
