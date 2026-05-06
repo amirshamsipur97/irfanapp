@@ -18,6 +18,9 @@ export async function GET(req: NextRequest) {
     let query = analyticsDb
       .from('leads')
       .select('*', { count: 'exact' })
+      // Show leads with contact info first, then by score, then by date
+      .order('email', { ascending: true, nullsFirst: false })
+      .order('lead_score', { ascending: false, nullsFirst: false })
       .order('inserted_at', { ascending: false })
 
     if (quality)     query = query.ilike('lead_quality', quality)
