@@ -92,24 +92,27 @@ export async function POST(req: NextRequest) {
   })
 
   // ── 4. Compute dedup_key for each row (must match Supabase UNIQUE INDEX) ─
-  const computeDedupKey = (email: string | null, phone: string | null): string | null => {
+  // For real contacts: 'E:email' or 'P:last8digits'
+  // For no-contact rows: 'N:' + lead_id (always unique, never null — satisfies NOT NULL constraint)
+  const computeDedupKey = (email: string | null, phone: string | null, leadId: string | null): string => {
     if (email && email.trim()) return 'E:' + email.trim().toLowerCase()
     if (phone && phone.trim()) {
       const digits = phone.replace(/[^0-9]/g, '')
       if (digits.length >= 4) return 'P:' + digits.slice(-8)
     }
-    return null  // No contact info — let DB insert without dedup
+    // Fallback for no-contact rows: use lead_id or generate one
+    return 'N:' + (leadId ?? `auto_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
   }
 
-  type LeadRow = typeof rows[0] & { dedup_key: string | null }
+  type LeadRow = typeof rows[0] & { dedup_key: string }
   const rowsWithKey: LeadRow[] = rows.map(r => ({
     ...r,
-    dedup_key: computeDedupKey(r.email, r.phone),
+    dedup_key: computeDedupKey(r.email, r.phone, r.lead_id),
   }))
 
-  // Split: rows with dedup_key (upsert) vs rows without (plain insert)
-  const withKey = rowsWithKey.filter(r => r.dedup_key !== null)
-  const noKey   = rowsWithKey.filter(r => r.dedup_key === null)
+  // All rows are upsert candidates now (no separate no-key path)
+  const withKey = rowsWithKey
+  const noKey: LeadRow[] = []
 
   // ── 5. Track date-cleaning stats ──────────────────────────────────────────
   let dateCleaned = 0
