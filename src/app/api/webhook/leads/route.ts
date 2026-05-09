@@ -91,23 +91,37 @@ export async function POST(req: NextRequest) {
     }
   })
 
-  // ── 4. Compute dedup_key for each row (must match Supabase UNIQUE INDEX) ─
-  // For real contacts: 'E:email' or 'P:last8digits'
-  // For no-contact rows: 'N:' + lead_id (always unique, never null — satisfies NOT NULL constraint)
-  const computeDedupKey = (email: string | null, phone: string | null, leadId: string | null): string => {
-    if (email && email.trim()) return 'E:' + email.trim().toLowerCase()
-    if (phone && phone.trim()) {
-      const digits = phone.replace(/[^0-9]/g, '')
+  // ── 4. Compute dedup_key (deterministic — same content → same key) ──
+  // Priority:
+  //   1. Email available → 'E:lower(email)'
+  //   2. Phone available → 'P:last8digits'
+  //   3. No contact     → 'C:' + 12-char SHA-1 hash of stable content
+  //                       (source_sheet + name + message + property + budget + country + city)
+  //      → Same row across runs always gets the same dedup_key
+  //      → Empty rows from same sheet collapse into ONE row (correct behavior)
+  const crypto = await import('node:crypto')
+  const contentHash = (...parts: (string | null)[]) => {
+    const joined = parts.map(p => (p ?? '').trim().toLowerCase()).join('|')
+    return crypto.createHash('sha1').update(joined).digest('hex').slice(0, 12)
+  }
+  const computeDedupKey = (r: typeof rows[0]): string => {
+    if (r.email && r.email.trim()) return 'E:' + r.email.trim().toLowerCase()
+    if (r.phone && r.phone.trim()) {
+      const digits = r.phone.replace(/[^0-9]/g, '')
       if (digits.length >= 4) return 'P:' + digits.slice(-8)
     }
-    // Fallback for no-contact rows: use lead_id or generate one
-    return 'N:' + (leadId ?? `auto_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
+    // Stable content-based hash for no-contact rows
+    const hash = contentHash(
+      r.source_sheet, r.full_name, r.message,
+      r.property_interest, r.budget, r.country, r.city,
+    )
+    return 'C:' + (r.source_sheet ?? 'x') + ':' + hash
   }
 
   type LeadRow = typeof rows[0] & { dedup_key: string }
   const rowsWithKey: LeadRow[] = rows.map(r => ({
     ...r,
-    dedup_key: computeDedupKey(r.email, r.phone, r.lead_id),
+    dedup_key: computeDedupKey(r),
   }))
 
   // All rows are upsert candidates now (no separate no-key path)
