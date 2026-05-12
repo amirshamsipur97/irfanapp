@@ -102,6 +102,28 @@ interface CeoReportResponse {
   stats: { total: number; hot: number; warm: number; cold: number; avgScore: string; highIntent: number; leadsToday: number }
 }
 
+// ── Calls interfaces ──────────────────────────────────────────────────────────
+interface Call {
+  id: number; lead_id: string | null; full_name: string | null; email: string | null
+  phone: string | null; country: string | null; city: string | null
+  property_interest: string | null; budget: string | null
+  lead_quality: string | null; lead_score: number | null; buyer_intent: string | null
+  voice_source: string | null; call_status: string | null; call_attempt_count: number | null
+  last_called_at: string | null; next_call_at: string | null; vapi_call_id: string | null
+  call_summary: string | null; call_transcript: string | null; interest_status: string | null
+  appointment_requested: boolean | null; appointment_time: string | null; appointment_status: string | null
+  follow_up_priority: string | null; assigned_sales_manager: string | null
+  inserted_at: string | null; source_sheet: string | null
+}
+interface CallsStats {
+  total: number; inbound: number; outbound: number
+  booked: number; interested: number; not_interested: number; no_answer: number
+  attempts_24h: number
+}
+interface CallsStore {
+  calls: Call[]; total: number; page: number; totalPages: number; stats: CallsStats
+}
+
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const PURPLE      = '#8B5CF6'
 const GOLD        = '#F59E0B'
@@ -153,7 +175,7 @@ export default function Dashboard() {
   const [analysisResp, setAnalysisResp] = useState<AnalysisResponse | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [analysisError, setAnalysisError]     = useState<string | null>(null)
-  const [tab, setTab] = useState<'overview'|'pages'|'geo'|'ads'|'ai'|'leads'>('overview')
+  const [tab, setTab] = useState<'overview'|'pages'|'geo'|'ads'|'ai'|'leads'|'calls'>('overview')
   const analysis = analysisResp?.analysis ?? null
 
   // ── Leads state ─────────────────────────────────────────────────────────────
@@ -171,6 +193,16 @@ export default function Dashboard() {
   const [ceoLoading, setCeoLoading]       = useState(false)
   const [ceoError, setCeoError]           = useState<string | null>(null)
   const [showCeo, setShowCeo]             = useState(false)
+
+  // ── Calls state ─────────────────────────────────────────────────────────────
+  const [callsStore, setCallsStore]       = useState<CallsStore | null>(null)
+  const [callsLoading, setCallsLoading]   = useState(false)
+  const [callsError, setCallsError]       = useState<string | null>(null)
+  const [callsPage, setCallsPage]         = useState(1)
+  const [callsSource, setCallsSource]     = useState('')
+  const [callsStatus, setCallsStatus]     = useState('')
+  const [callsSearch, setCallsSearch]     = useState('')
+  const [expandedCall, setExpandedCall]   = useState<number | null>(null)
 
   const loadData = () =>
     fetch('/api/data').then(r => r.json()).then((d: GA4Store) => setStore(d))
@@ -212,6 +244,24 @@ export default function Dashboard() {
     if (tab === 'leads') loadLeads(1)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, leadsSearch, leadsQuality, leadsCountry, leadsProperty, leadsSheet])
+
+  const loadCalls = (p = 1) => {
+    setCallsLoading(true); setCallsError(null)
+    const params = new URLSearchParams({ page: String(p), limit: '30' })
+    if (callsSearch) params.set('search', callsSearch)
+    if (callsSource) params.set('voice_source', callsSource)
+    if (callsStatus) params.set('call_status', callsStatus)
+    fetch(`/api/calls?${params}`)
+      .then(r => r.json())
+      .then((d: CallsStore) => { setCallsStore(d); setCallsPage(p) })
+      .catch(e => setCallsError(e.message))
+      .finally(() => setCallsLoading(false))
+  }
+
+  useEffect(() => {
+    if (tab === 'calls') loadCalls(1)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, callsSearch, callsSource, callsStatus])
 
   const runAnalysis = async () => {
     setLoadingAnalysis(true)
@@ -295,6 +345,7 @@ export default function Dashboard() {
     { id: 'geo',      label: 'Geography' },
     { id: 'ads',      label: '📢 Google Ads' },
     { id: 'leads',    label: '👥 Leads CRM' },
+    { id: 'calls',    label: '📞 Calls' },
     { id: 'ai',       label: '✦ AI Insights' },
   ] as const
 
@@ -1030,6 +1081,248 @@ export default function Dashboard() {
                 )}
               </div>
 
+            </div>
+          )
+        })()}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            CALLS TAB (Vapi inbound + outbound)
+        ════════════════════════════════════════════════════════════════════ */}
+        {tab === 'calls' && (() => {
+          const calls       = callsStore?.calls ?? []
+          const callsTotal  = callsStore?.total ?? 0
+          const s           = callsStore?.stats ?? { total:0,inbound:0,outbound:0,booked:0,interested:0,not_interested:0,no_answer:0,attempts_24h:0 }
+
+          const statusStyle = (st: string | null) => {
+            const k = (st ?? '').toLowerCase()
+            if (k === 'booked')           return { bg: 'bg-emerald-500/15 border border-emerald-500/30', text: 'text-emerald-400', label: 'Booked' }
+            if (k === 'completed')        return { bg: 'bg-green-500/15 border border-green-500/30',    text: 'text-green-400',   label: 'Completed' }
+            if (k === 'in_progress')      return { bg: 'bg-purple-500/15 border border-purple-500/30',   text: 'text-purple-400',  label: 'In Progress' }
+            if (k === 'initiated')        return { bg: 'bg-blue-500/15 border border-blue-500/30',      text: 'text-blue-400',    label: 'Initiated' }
+            if (k === 'no_answer' || k === 'failed') return { bg: 'bg-yellow-500/15 border border-yellow-500/30', text: 'text-yellow-400', label: k === 'no_answer' ? 'No Answer' : 'Failed' }
+            if (k === 'not_interested')   return { bg: 'bg-red-500/15 border border-red-500/30',        text: 'text-red-400',     label: 'Not Interested' }
+            if (k === 'do_not_call')      return { bg: 'bg-red-500/15 border border-red-500/30',        text: 'text-red-400',     label: 'Do Not Call' }
+            return { bg: 'bg-white/5 border border-white/10', text: 'text-white/40', label: st ?? '—' }
+          }
+
+          const sourceBadge = (src: string | null) => {
+            if (src === 'inbound')             return { bg:'bg-cyan-500/15 border border-cyan-500/30',    text:'text-cyan-400',    icon:'📲', label:'Inbound' }
+            if (src === 'outbound_campaign')   return { bg:'bg-purple-500/15 border border-purple-500/30',text:'text-purple-400',  icon:'📤', label:'Campaign' }
+            if (src === 'manual')              return { bg:'bg-amber-500/15 border border-amber-500/30',  text:'text-amber-400',   icon:'👤', label:'Manual' }
+            return { bg:'bg-white/5 border border-white/10', text:'text-white/40', icon:'•', label: src ?? '—' }
+          }
+
+          const fmtDateTime = (d: string | null) => {
+            if (!d) return '—'
+            return new Date(d).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+          }
+
+          return (
+            <div className="space-y-4">
+
+              {/* KPI Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                <KpiCard label="Total Calls"    value={String(s.total)}          accent={PURPLE} />
+                <KpiCard label="📲 Inbound"     value={String(s.inbound)}        accent="#06B6D4" />
+                <KpiCard label="📤 Outbound"    value={String(s.outbound)}       accent="#A855F7" />
+                <KpiCard label="Booked"         value={String(s.booked)}         accent={GREEN}  />
+                <KpiCard label="Interested"     value={String(s.interested)}     accent="#22C55E" />
+                <KpiCard label="Not Interested" value={String(s.not_interested)} accent={RED}    />
+                <KpiCard label="No Answer"      value={String(s.no_answer)}      accent={GOLD}   />
+                <KpiCard label="Last 24h"       value={String(s.attempts_24h)}   accent={BLUE}   />
+              </div>
+
+              {/* Vapi connection status banner */}
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-2xl p-4 flex flex-wrap items-center gap-3">
+                <span className="text-xs text-white/40 uppercase tracking-widest font-semibold">🔗 Vapi Webhooks</span>
+                <span className="text-xs text-white/30">Inbound:</span>
+                <code className="text-xs text-cyan-400 bg-cyan-400/10 px-2 py-1 rounded-md">analytics-test.app.n8n.cloud/webhook/vapi-inbound-call</code>
+                <span className="text-xs text-white/30 ml-2">Call Ended:</span>
+                <code className="text-xs text-purple-400 bg-purple-400/10 px-2 py-1 rounded-md">analytics-test.app.n8n.cloud/webhook/vapi-call-ended</code>
+              </div>
+
+              {/* Filters */}
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-2xl p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 text-xs">🔍</span>
+                    <input type="text" placeholder="Search name, email, phone…" value={callsSearch} onChange={e => setCallsSearch(e.target.value)}
+                      className="w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-2.5 pl-8 text-sm text-white placeholder-white/25 focus:outline-none focus:border-purple-500/50 transition-colors" />
+                  </div>
+                  <select value={callsSource} onChange={e => setCallsSource(e.target.value)}
+                    className="bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white/70 focus:outline-none focus:border-purple-500/50">
+                    <option value="">All Sources</option>
+                    <option value="inbound">📲 Inbound</option>
+                    <option value="outbound_campaign">📤 Campaign</option>
+                    <option value="manual">👤 Manual</option>
+                  </select>
+                  <select value={callsStatus} onChange={e => setCallsStatus(e.target.value)}
+                    className="bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white/70 focus:outline-none focus:border-purple-500/50">
+                    <option value="">All Statuses</option>
+                    <option value="initiated">Initiated</option>
+                    <option value="completed">Completed</option>
+                    <option value="booked">Booked</option>
+                    <option value="no_answer">No Answer</option>
+                    <option value="failed">Failed</option>
+                    <option value="not_interested">Not Interested</option>
+                  </select>
+                  <button onClick={() => { setCallsSearch(''); setCallsSource(''); setCallsStatus('') }}
+                    className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] rounded-xl px-3 py-2.5 text-sm text-white/40 hover:text-white/70 transition-colors">
+                    Clear filters
+                  </button>
+                </div>
+              </div>
+
+              {/* Empty / Loading / Error */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl overflow-hidden">
+                <div className="p-5 border-b border-white/[0.06] flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Call Activity</h3>
+                    <p className="text-white/30 text-xs mt-0.5">{callsTotal.toLocaleString()} calls · click row to see transcript</p>
+                  </div>
+                  {callsStore && callsStore.totalPages > 1 && (
+                    <span className="text-xs text-white/30">Page {callsPage} of {callsStore.totalPages}</span>
+                  )}
+                </div>
+
+                {callsLoading && (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="relative w-10 h-10">
+                      <div className="absolute inset-0 rounded-full border-2 border-purple-500/20" />
+                      <div className="absolute inset-0 rounded-full border-2 border-t-purple-500 animate-spin" />
+                    </div>
+                  </div>
+                )}
+
+                {callsError && !callsLoading && (
+                  <div className="flex flex-col items-center py-12 gap-3">
+                    <p className="text-red-400 text-sm">{callsError}</p>
+                    <button onClick={() => loadCalls(callsPage)} className="text-xs text-white/30 hover:text-white/60 transition-colors">Retry</button>
+                  </div>
+                )}
+
+                {!callsLoading && !callsError && calls.length === 0 && (
+                  <div className="flex flex-col items-center py-16 gap-3 px-6 text-center">
+                    <span className="text-4xl">📞</span>
+                    <p className="text-white/70 text-base font-medium">No calls yet</p>
+                    <p className="text-white/30 text-sm max-w-md">
+                      Once Vapi sends an inbound call or an outbound campaign runs, calls will appear here automatically.
+                      <br/>
+                      <span className="text-white/50 mt-2 block">Wiring is ready — webhooks <code className="text-purple-400">/api/webhook/voice-leads</code>, <code className="text-purple-400">/api/webhook/call-attempts</code>, and <code className="text-purple-400">/api/webhook/update-lead</code> are live.</span>
+                    </p>
+                  </div>
+                )}
+
+                {!callsLoading && !callsError && calls.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-white/[0.06]">
+                          {['Type','Caller','Phone','Status','Interest','Attempts','Last Called','Appointment'].map(h => (
+                            <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold text-white/30 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {calls.map(call => {
+                          const src   = sourceBadge(call.voice_source)
+                          const stat  = statusStyle(call.call_status)
+                          const isExp = expandedCall === call.id
+                          return (
+                            <>
+                              <tr key={call.id}
+                                className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer transition-colors"
+                                onClick={() => setExpandedCall(isExp ? null : call.id)}>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-semibold ${src.bg} ${src.text}`}>
+                                    <span>{src.icon}</span> {src.label}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <p className="text-white font-medium">{call.full_name || '—'}</p>
+                                  {call.email && <p className="text-white/30 text-[10px]">{call.email}</p>}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap font-mono text-white/55">{call.phone || '—'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${stat.bg} ${stat.text}`}>{stat.label}</span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-white/55">{call.interest_status || '—'}</td>
+                                <td className="px-4 py-3 whitespace-nowrap text-center">
+                                  <span className="text-white/40">{call.call_attempt_count ?? 0}</span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-white/30 text-[10px]">{fmtDateTime(call.last_called_at)}</td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  {call.appointment_status ? (
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                      call.appointment_status === 'confirmed' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                                      call.appointment_status === 'cancelled' ? 'bg-red-500/15 text-red-400 border border-red-500/30'             :
+                                                                                'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30'
+                                    }`}>{call.appointment_status}</span>
+                                  ) : <span className="text-white/20 text-[10px]">—</span>}
+                                </td>
+                              </tr>
+                              {isExp && (
+                                <tr key={`${call.id}-exp`} className="bg-white/[0.02] border-b border-white/[0.04]">
+                                  <td colSpan={8} className="px-6 py-5">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {call.call_summary && (
+                                        <div className="p-3 bg-purple-500/5 border border-purple-500/15 rounded-xl">
+                                          <p className="text-[10px] text-purple-400 font-bold uppercase tracking-wider mb-1.5">📝 Call Summary</p>
+                                          <p className="text-white/65 text-xs leading-relaxed">{call.call_summary}</p>
+                                        </div>
+                                      )}
+                                      {call.call_transcript && (
+                                        <div className="p-3 bg-cyan-500/5 border border-cyan-500/15 rounded-xl max-h-48 overflow-y-auto">
+                                          <p className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-1.5">🎙 Transcript</p>
+                                          <p className="text-white/65 text-xs leading-relaxed whitespace-pre-wrap">{call.call_transcript}</p>
+                                        </div>
+                                      )}
+                                      <div className="p-3 bg-white/[0.03] border border-white/[0.06] rounded-xl md:col-span-2">
+                                        <p className="text-[10px] text-white/30 font-bold uppercase tracking-wider mb-2">Lead Details</p>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                          {([
+                                            ['Vapi Call ID',   call.vapi_call_id ? call.vapi_call_id.slice(0,12)+'…' : null],
+                                            ['Property',       call.property_interest],
+                                            ['Budget',         call.budget],
+                                            ['Location Pref.', call.preferred_location],
+                                            ['Country',        call.country],
+                                            ['City',           call.city],
+                                            ['Quality',        call.lead_quality],
+                                            ['Score',          call.lead_score ? String(call.lead_score) : null],
+                                            ['Buyer Intent',   call.buyer_intent],
+                                            ['Follow-up',      call.follow_up_priority],
+                                            ['Sales Rep',      call.assigned_sales_manager],
+                                            ['Appt. Time',     call.appointment_time ? fmtDateTime(call.appointment_time) : null],
+                                            ['Next Call',      call.next_call_at ? fmtDateTime(call.next_call_at) : null],
+                                            ['Source Sheet',   call.source_sheet],
+                                          ] as [string, string|null][]).filter(([,v]) => v).map(([k,v]) => (
+                                            <div key={k}><span className="text-white/25">{k}: </span><span className="text-white/65">{v}</span></div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Pagination */}
+                {!callsLoading && callsStore && callsStore.totalPages > 1 && (
+                  <div className="p-4 border-t border-white/[0.06] flex items-center justify-between">
+                    <button onClick={() => loadCalls(callsPage - 1)} disabled={callsPage <= 1}
+                      className="px-4 py-2 rounded-xl text-xs font-medium bg-white/[0.05] border border-white/[0.08] text-white/50 hover:text-white/80 disabled:opacity-30 disabled:cursor-not-allowed transition-all">← Previous</button>
+                    <span className="text-xs text-white/30">Page {callsPage} of {callsStore.totalPages}</span>
+                    <button onClick={() => loadCalls(callsPage + 1)} disabled={callsPage >= callsStore.totalPages}
+                      className="px-4 py-2 rounded-xl text-xs font-medium bg-white/[0.05] border border-white/[0.08] text-white/50 hover:text-white/80 disabled:opacity-30 disabled:cursor-not-allowed transition-all">Next →</button>
+                  </div>
+                )}
+              </div>
             </div>
           )
         })()}
