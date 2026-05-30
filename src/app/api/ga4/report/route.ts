@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ga4Client, ga4Configured, GA4_PROPERTY, rowsToObjects } from '@/lib/ga4'
+import { categorizePath } from '@/lib/siteMap'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +60,26 @@ export async function GET(req: NextRequest) {
     ])
 
     const t = totals[0]?.rows?.[0]?.metricValues ?? []
+
+    // Categorize every page by the NEW site map (not the old Webflow structure)
+    // and roll metrics up per section.
+    const pageRows = rowsToObjects(pages[0]).map(p => {
+      const cat = categorizePath(String(p.pagePath ?? '/'))
+      return { ...p, section: cat.section, section_label: cat.label, is_legacy: cat.isLegacy }
+    })
+    const sectionMap = new Map<string, { section: string; page_views: number; users: number; sessions: number; key_events: number; legacy: boolean }>()
+    for (const p of pageRows) {
+      const m = p as unknown as Record<string, number>
+      const s = sectionMap.get(p.section) ?? { section: p.section, page_views: 0, users: 0, sessions: 0, key_events: 0, legacy: true }
+      s.page_views += Number(m.screenPageViews) || 0
+      s.users += Number(m.totalUsers) || 0
+      s.sessions += Number(m.sessions) || 0
+      s.key_events += Number(m.keyEvents) || 0
+      if (!p.is_legacy) s.legacy = false  // section is legacy only if ALL its pages are legacy
+      sectionMap.set(p.section, s)
+    }
+    const sections = [...sectionMap.values()].sort((a, b) => b.page_views - a.page_views)
+
     return NextResponse.json({
       configured: true,
       generated_at: new Date().toISOString(),
@@ -72,7 +93,8 @@ export async function GET(req: NextRequest) {
         avg_session_duration: Number(t[5]?.value ?? 0),
       },
       timeseries: rowsToObjects(timeseries[0]),
-      pages: rowsToObjects(pages[0]),
+      pages: pageRows,
+      sections,
       devices: rowsToObjects(devices[0]),
       channels: rowsToObjects(channels[0]),
     })

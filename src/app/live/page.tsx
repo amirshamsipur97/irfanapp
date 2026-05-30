@@ -16,7 +16,8 @@ interface ReportResp {
   range_days?: number
   totals?: { page_views: number; users: number; sessions: number; key_events: number; engagement_rate: number; avg_session_duration: number }
   timeseries?: Record<string, number | string>[]
-  pages?: Record<string, string | number>[]
+  pages?: Record<string, string | number | boolean>[]
+  sections?: { section: string; page_views: number; users: number; sessions: number; key_events: number; legacy: boolean }[]
   devices?: Record<string, string | number>[]
   channels?: Record<string, string | number>[]
 }
@@ -169,6 +170,26 @@ export default function LivePage() {
           <Stat label="Avg. session" value={dur(totals?.avg_session_duration ?? 0)} />
         </section>
 
+        {/* Sections — grouped by the NEW site map */}
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">By site section <span className="text-white/30 font-normal">· new site map</span></h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {(rep?.sections ?? []).map((s, i) => (
+              <div key={i} className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-white/90">{s.section}</span>
+                  {s.legacy && <span className="rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 text-[9px] uppercase tracking-wider">legacy</span>}
+                </div>
+                <div className="mt-1 text-lg font-bold tabular-nums">{n(s.page_views)} <span className="text-white/30 text-xs font-normal">views</span></div>
+                <div className="text-white/40 text-[11px] tabular-nums">{n(s.users)} users · {n(s.sessions)} sessions</div>
+              </div>
+            ))}
+            {!rep?.sections?.length && <div className="text-white/30 text-sm">No page data in range.</div>}
+          </div>
+        </Card>
+
         {/* Top pages — full paths */}
         <Card>
           <h3 className="text-sm font-semibold mb-3">Top pages</h3>
@@ -189,7 +210,11 @@ export default function LivePage() {
                 {(rep?.pages ?? []).map((p, i) => (
                   <tr key={i} className="hover:bg-white/[0.02]">
                     <td className="py-2 pr-3">
-                      <div className="text-white/90 font-medium">{String(p.pagePath || '/')}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white/90 font-medium">{String(p.pagePath || '/')}</span>
+                        <span className="rounded bg-white/5 text-white/50 border border-white/10 px-1.5 py-0.5 text-[9px]">{String(p.section || 'Other')}</span>
+                        {p.is_legacy === true && <span className="rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 text-[9px] uppercase tracking-wider">legacy</span>}
+                      </div>
                       <div className="text-white/30 text-[11px] truncate max-w-[420px]">{String(p.pageTitle || '')}</div>
                     </td>
                     <td className="py-2 px-3 text-right tabular-nums">{n(p.screenPageViews)}</td>

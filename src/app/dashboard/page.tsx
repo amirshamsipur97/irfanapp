@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { categorizePath } from '@/lib/siteMap'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart, Pie, Cell,
@@ -204,8 +205,21 @@ export default function Dashboard() {
   const [callsSearch, setCallsSearch]     = useState('')
   const [expandedCall, setExpandedCall]   = useState<number | null>(null)
 
+  // ── Realtime state ──────────────────────────────────────────────────────────
+  interface RealtimeRow { country: string; city: string; page_path: string | null; device: string | null; source: string | null; active_users: number; views_30min: number; synced_at: string }
+  interface RealtimeCountry { country: string; active_users: number; city_count: number }
+  interface RealtimeCity { city: string; country: string; active_users: number; views: number }
+  interface RealtimeStore { syncedAt: string | null; totalActive: number; totalViews: number; byCountry: RealtimeCountry[]; byCity: RealtimeCity[]; raw: RealtimeRow[] }
+  const [realtime, setRealtime] = useState<RealtimeStore | null>(null)
+
   const loadData = () =>
     fetch('/api/data').then(r => r.json()).then((d: GA4Store) => setStore(d))
+
+  const loadRealtime = () =>
+    fetch('/api/realtime', { cache: 'no-store' })
+      .then(r => r.json())
+      .then((d: RealtimeStore) => setRealtime(d))
+      .catch(() => {})
 
   const loadLeads = (p = 1) => {
     setLeadsLoading(true); setLeadsError(null)
@@ -237,6 +251,13 @@ export default function Dashboard() {
   useEffect(() => {
     loadData()
     const iv = setInterval(loadData, 5 * 60 * 1000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // ── Realtime polling — every 30 seconds ─────────────────────────────────
+  useEffect(() => {
+    loadRealtime()
+    const iv = setInterval(loadRealtime, 30 * 1000)
     return () => clearInterval(iv)
   }, [])
 
@@ -320,15 +341,15 @@ export default function Dashboard() {
     }, {})
   ).sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }))
 
+  // Group page views by the NEW site map's sections (legacy Webflow paths are
+  // folded into their nearest new section, so the chart reflects the new site).
   const topPages = Object.entries(
     rows.reduce((acc: Record<string, number>, r) => {
-      const p = (r.page_location || '').replace('https://irfaninvest.com', '') || '/'
-      acc[p] = (acc[p] || 0) + (r.screen_page_views || r.page_views || 0)
+      const cat = categorizePath(r.page_location || '/')
+      acc[cat.section] = (acc[cat.section] || 0) + (r.screen_page_views || r.page_views || 0)
       return acc
     }, {})
-  ).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page, views]) => ({
-    page: page.length > 32 ? page.slice(0, 32) + '…' : page, views,
-  }))
+  ).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page, views]) => ({ page, views }))
 
   const countries = Object.entries(
     rows.reduce((acc: Record<string, number>, r) => {
@@ -433,164 +454,851 @@ export default function Dashboard() {
         </div>
 
         {/* ════════════════════════════════════════════════════════════════════
-            OVERVIEW TAB
+            OVERVIEW TAB — Enhanced analytical view
         ════════════════════════════════════════════════════════════════════ */}
-        {tab === 'overview' && (
-          <div className="space-y-4">
-            {/* Area chart */}
-            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">Traffic Over Time</h3>
-                  <p className="text-white/30 text-xs mt-0.5">Page views & active users per day</p>
+        {tab === 'overview' && (() => {
+          // ── Build extra GA4 aggregations for this tab only ──
+          const byDateFull = Object.entries(
+            rows.reduce((acc: Record<string, { pageViews: number; users: number; events: number; leads: number }>, r) => {
+              const d = r.date.slice(5)
+              if (!acc[d]) acc[d] = { pageViews: 0, users: 0, events: 0, leads: 0 }
+              acc[d].pageViews += r.screen_page_views || r.page_views || 0
+              acc[d].users     += r.active_1_day_users || 0
+              acc[d].events    += r.event_count || 0
+              acc[d].leads     += r.generate_lead_events || 0
+              return acc
+            }, {})
+          ).sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }))
+
+          // Day-of-week heatmap data (which day brings most traffic)
+          const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+          const byDow = Array.from({ length: 7 }, (_, i) => ({ day: dowNames[i], pageViews: 0, users: 0 }))
+          rows.forEach(r => {
+            const d = new Date(r.date)
+            if (!isNaN(d.getTime())) {
+              const dow = d.getUTCDay()
+              byDow[dow].pageViews += r.screen_page_views || r.page_views || 0
+              byDow[dow].users     += r.active_1_day_users || 0
+            }
+          })
+
+          // Page distribution (donut) — by site section, named (no more "/")
+          const pageDistribution = Object.entries(
+            rows.reduce((acc: Record<string, number>, r) => {
+              const cat = categorizePath(r.page_location || '/')
+              acc[cat.section] = (acc[cat.section] || 0) + (r.screen_page_views || r.page_views || 0)
+              return acc
+            }, {})
+          ).map(([name, value]) => ({ name, value })).filter(d => d.value > 0).sort((a, b) => b.value - a.value)
+
+          const totalDistribution = pageDistribution.reduce((s, p) => s + p.value, 0)
+
+          // Top cities
+          const topCities = Object.entries(
+            rows.reduce((acc: Record<string, { users: number; country: string }>, r) => {
+              const key = r.city || 'Unknown'
+              if (!acc[key]) acc[key] = { users: 0, country: r.country }
+              acc[key].users += r.active_28_day_users || 0
+              return acc
+            }, {})
+          ).sort((a, b) => b[1].users - a[1].users).slice(0, 5).map(([city, v]) => ({ city, ...v }))
+
+          // Engagement funnel
+          const avgEventsPerView = totalViews ? (totalEvents / totalViews).toFixed(1) : '0'
+          const leadConversionRate = totalUsers28 ? ((totalLeads / totalUsers28) * 100).toFixed(2) : '0'
+
+          // Recent activity with proper labels
+          const recentActivity = [...rows].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map(r => ({
+            ...r,
+            label: categorizePath(r.page_location || '/').label,
+            isLegacy: categorizePath(r.page_location || '/').isLegacy,
+          }))
+
+          return (
+            <div className="space-y-4">
+              {/* ── Traffic Over Time (3 metrics: views + users + events) ── */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6">
+                <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Traffic Over Time</h3>
+                    <p className="text-white/30 text-xs mt-0.5">Page views, active users & events per day</p>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-white/40 flex-wrap">
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: PURPLE }} /> Page Views</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: GOLD }} /> Active Users</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: BLUE }} /> Events</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4 text-xs text-white/40">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full" style={{ background: PURPLE }} />
-                    Page Views
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full" style={{ background: GOLD }} />
-                    Active Users
-                  </span>
+                <ResponsiveContainer width="100%" height={240}>
+                  <AreaChart data={byDateFull}>
+                    <defs>
+                      <linearGradient id="gPurple" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={PURPLE} stopOpacity={0.3} /><stop offset="95%" stopColor={PURPLE} stopOpacity={0} /></linearGradient>
+                      <linearGradient id="gGold"   x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={GOLD}   stopOpacity={0.3} /><stop offset="95%" stopColor={GOLD}   stopOpacity={0} /></linearGradient>
+                      <linearGradient id="gBlue"   x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={BLUE}   stopOpacity={0.2} /><stop offset="95%" stopColor={BLUE}   stopOpacity={0} /></linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                    <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                    <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<DarkTooltip />} />
+                    <Area type="monotone" dataKey="pageViews" name="Page Views"   stroke={PURPLE} strokeWidth={2} fill="url(#gPurple)" dot={false} />
+                    <Area type="monotone" dataKey="users"     name="Active Users" stroke={GOLD}   strokeWidth={2} fill="url(#gGold)"   dot={false} />
+                    <Area type="monotone" dataKey="events"    name="Events"       stroke={BLUE}   strokeWidth={1.5} fill="url(#gBlue)" dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* ── Engagement KPI strip ── */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Events per View</p>
+                  <p className="text-2xl font-bold text-white mt-2">{avgEventsPerView}</p>
+                  <p className="text-white/30 text-[10px] mt-1">User engagement depth</p>
+                </div>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Lead Conv. Rate</p>
+                  <p className="text-2xl font-bold text-white mt-2">{leadConversionRate}%</p>
+                  <p className="text-white/30 text-[10px] mt-1">28-day users → leads</p>
+                </div>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Top Country</p>
+                  <p className="text-2xl font-bold text-white mt-2">{countries[0]?.name ?? '—'}</p>
+                  <p className="text-white/30 text-[10px] mt-1">{countries[0] ? `${Math.round((countries[0].value / totalCountryUsers) * 100)}% of audience` : ''}</p>
+                </div>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Top Page</p>
+                  <p className="text-2xl font-bold text-white mt-2">{pageDistribution[0]?.name ?? '—'}</p>
+                  <p className="text-white/30 text-[10px] mt-1">{pageDistribution[0] ? `${Math.round((pageDistribution[0].value / totalDistribution) * 100)}% of views` : ''}</p>
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={byDate}>
-                  <defs>
-                    <linearGradient id="gPurple" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={PURPLE} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={PURPLE} stopOpacity={0}   />
-                    </linearGradient>
-                    <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={GOLD} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={GOLD} stopOpacity={0}   />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                  <Tooltip content={<DarkTooltip />} />
-                  <Area type="monotone" dataKey="pageViews" name="Page Views" stroke={PURPLE} strokeWidth={2} fill="url(#gPurple)" dot={false} />
-                  <Area type="monotone" dataKey="users"     name="Active Users" stroke={GOLD}   strokeWidth={2} fill="url(#gGold)"   dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Countries */}
-              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
-                <h3 className="text-sm font-semibold text-white mb-1">Traffic by Country</h3>
-                <p className="text-white/30 text-xs mb-5">Active users (28-day window)</p>
-                <div className="space-y-4">
-                  {countries.map((c, i) => {
-                    const pct = totalCountryUsers ? Math.round((c.value / totalCountryUsers) * 100) : 0
-                    return (
-                      <div key={c.name}>
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-white font-medium">{c.name}</span>
-                          <span className="text-white/40">{pct}% · {c.value.toLocaleString()}</span>
-                        </div>
-                        <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-700"
-                            style={{ width: `${pct}%`, background: PIE_COLORS[i % PIE_COLORS.length] }}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
+              {/* ── Page Distribution Donut + Day-of-Week ── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Donut */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Traffic Distribution by Page</h3>
+                  <p className="text-white/30 text-xs mb-4">Share of views per site section</p>
+                  <div className="flex items-center gap-4">
+                    <ResponsiveContainer width="55%" height={200}>
+                      <PieChart>
+                        <Pie data={pageDistribution} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2} dataKey="value" nameKey="name">
+                          {pageDistribution.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke="none" />)}
+                        </Pie>
+                        <Tooltip content={<DarkTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-2">
+                      {pageDistribution.slice(0, 6).map((p, i) => {
+                        const pct = totalDistribution ? Math.round((p.value / totalDistribution) * 100) : 0
+                        return (
+                          <div key={p.name} className="flex items-center justify-between text-xs">
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                              <span className="text-white/80 font-medium">{p.name}</span>
+                            </span>
+                            <span className="text-white/40 tabular-nums">{pct}%</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Day-of-Week pattern */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Traffic by Day of Week</h3>
+                  <p className="text-white/30 text-xs mb-4">When your audience is most active</p>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={byDow}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                      <Bar dataKey="pageViews" name="Page Views" fill={PURPLE} radius={[6, 6, 0, 0]} maxBarSize={32} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
 
-              {/* Recent activity */}
-              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
-                <h3 className="text-sm font-semibold text-white mb-1">Recent Activity</h3>
-                <p className="text-white/30 text-xs mb-5">Latest page sessions</p>
-                <div className="space-y-1">
-                  {[...rows].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6).map((r, i) => (
-                    <div key={i} className="flex items-center justify-between py-2.5 border-b border-white/[0.05] last:border-0">
-                      <div>
-                        <p className="text-xs text-white font-medium truncate max-w-[180px]">
-                          {(r.page_location || '').replace('https://irfaninvest.com', '') || '/'}
+              {/* ── Countries + Cities ── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Countries */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Traffic by Country</h3>
+                  <p className="text-white/30 text-xs mb-5">Active users (28-day window)</p>
+                  <div className="space-y-4">
+                    {countries.map((c, i) => {
+                      const pct = totalCountryUsers ? Math.round((c.value / totalCountryUsers) * 100) : 0
+                      return (
+                        <div key={c.name}>
+                          <div className="flex justify-between text-xs mb-1.5">
+                            <span className="text-white font-medium">{c.name}</span>
+                            <span className="text-white/40 tabular-nums">{pct}% · {c.value.toLocaleString()}</span>
+                          </div>
+                          <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-700"
+                              style={{ width: `${pct}%`, background: PIE_COLORS[i % PIE_COLORS.length] }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Top cities */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Top Cities</h3>
+                  <p className="text-white/30 text-xs mb-5">Most engaged urban audiences</p>
+                  <div className="space-y-3">
+                    {topCities.map((c, i) => (
+                      <div key={c.city} className="flex items-center justify-between py-1.5 border-b border-white/[0.05] last:border-0">
+                        <div className="flex items-center gap-3">
+                          <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white"
+                            style={{ background: `${PIE_COLORS[i % PIE_COLORS.length]}30`, color: PIE_COLORS[i % PIE_COLORS.length] }}>
+                            #{i + 1}
+                          </span>
+                          <div>
+                            <p className="text-xs text-white font-medium">{c.city}</p>
+                            <p className="text-[10px] text-white/30">{c.country}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs font-semibold tabular-nums" style={{ color: PURPLE }}>
+                          {c.users.toLocaleString()} <span className="text-white/40 font-normal">users</span>
                         </p>
-                        <p className="text-[10px] text-white/30 mt-0.5">{r.country} · {r.date}</p>
                       </div>
-                      <div className="text-right flex-shrink-0 ml-4">
-                        <p className="text-xs font-semibold" style={{ color: PURPLE }}>{r.screen_page_views || r.page_views || 0} views</p>
-                        <p className="text-[10px] text-white/30">{r.active_1_day_users || 0} active</p>
+                    ))}
+                    {topCities.length === 0 && <p className="text-white/30 text-xs">No city data available</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Recent activity (with proper page labels!) ── */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-sm font-semibold text-white">Recent Activity</h3>
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Top 10 sessions</span>
+                </div>
+                <p className="text-white/30 text-xs mb-5">Latest page sessions by date</p>
+                <div className="space-y-1">
+                  {recentActivity.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between py-2.5 border-b border-white/[0.05] last:border-0 gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-white font-medium truncate">{r.label}</p>
+                          {r.isLegacy && (
+                            <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/20 flex-shrink-0">
+                              Legacy
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-white/30 mt-0.5 truncate">
+                          {r.country}{r.city && r.city !== 'Unknown' ? ` · ${r.city}` : ''} · {r.date}
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs font-semibold tabular-nums" style={{ color: PURPLE }}>
+                          {(r.screen_page_views || r.page_views || 0).toLocaleString()} <span className="text-white/40 font-normal">views</span>
+                        </p>
+                        <p className="text-[10px] text-white/30 tabular-nums">
+                          {(r.active_1_day_users || 0).toLocaleString()} active · {(r.event_count || 0).toLocaleString()} events
+                        </p>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ════════════════════════════════════════════════════════════════════
-            TOP PAGES TAB
+            TOP PAGES TAB — Detailed page-level analytics
         ════════════════════════════════════════════════════════════════════ */}
-        {tab === 'pages' && (
-          <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6">
-            <h3 className="text-sm font-semibold text-white mb-1">Top Pages by Views</h3>
-            <p className="text-white/30 text-xs mb-6">Ranked by total screen/page views</p>
-            <ResponsiveContainer width="100%" height={340}>
-              <BarChart data={topPages} layout="vertical" margin={{ left: 8, right: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
-                <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis dataKey="page" type="category" width={190} tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 10 }} tickLine={false} axisLine={false} />
-                <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                <Bar dataKey="views" name="Views" fill={PURPLE} radius={[0, 6, 6, 0]} maxBarSize={24} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+        {tab === 'pages' && (() => {
+          // ── Aggregate by labelled page (use full label, not just section) ──
+          interface PageAgg {
+            label: string
+            section: string
+            isLegacy: boolean
+            views: number
+            users: number
+            events: number
+            leads: number
+            sessions: number
+            pages: Set<string>
+          }
+          const byLabelMap = rows.reduce((acc: Record<string, PageAgg>, r) => {
+            const cat = categorizePath(r.page_location || '/')
+            const key = cat.label
+            if (!acc[key]) acc[key] = {
+              label: cat.label, section: cat.section, isLegacy: cat.isLegacy,
+              views: 0, users: 0, events: 0, leads: 0, sessions: 0, pages: new Set(),
+            }
+            acc[key].views    += r.screen_page_views || r.page_views || 0
+            acc[key].users    += r.active_28_day_users || 0
+            acc[key].events   += r.event_count || 0
+            acc[key].leads    += r.generate_lead_events || 0
+            acc[key].sessions += r.sessions_per_user || 0
+            acc[key].pages.add(r.page_location || '/')
+            return acc
+          }, {})
+          const byLabel = Object.values(byLabelMap)
+            .map(p => ({
+              ...p,
+              uniqueUrls: p.pages.size,
+              eventsPerView: p.views > 0 ? +(p.events / p.views).toFixed(2) : 0,
+              leadRate: p.users > 0 ? +((p.leads / p.users) * 100).toFixed(2) : 0,
+            }))
+            .sort((a, b) => b.views - a.views)
+
+          const topPagesDetailed = byLabel.slice(0, 10)
+          const totalPageViews = byLabel.reduce((s, p) => s + p.views, 0)
+
+          // ── Page performance over time (top 5 pages, stacked area) ──
+          const top5Labels = byLabel.slice(0, 5).map(p => p.label)
+          const pagesOverTime = Object.entries(
+            rows.reduce((acc: Record<string, Record<string, number>>, r) => {
+              const d = r.date.slice(5)
+              const label = categorizePath(r.page_location || '/').label
+              if (!top5Labels.includes(label)) return acc
+              if (!acc[d]) acc[d] = {}
+              acc[d][label] = (acc[d][label] || 0) + (r.screen_page_views || r.page_views || 0)
+              return acc
+            }, {})
+          ).sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }))
+
+          // ── Legacy vs New site ──
+          const legacyVsNew = byLabel.reduce(
+            (acc, p) => {
+              if (p.isLegacy) { acc.legacy += p.views; acc.legacyPages += 1 }
+              else { acc.current += p.views; acc.currentPages += 1 }
+              return acc
+            },
+            { current: 0, legacy: 0, currentPages: 0, legacyPages: 0 },
+          )
+          const legacyPct = totalPageViews > 0 ? Math.round((legacyVsNew.legacy / totalPageViews) * 100) : 0
+
+          // ── Engagement scatter — views vs events ──
+          const engagementData = byLabel.slice(0, 8).map(p => ({
+            label: p.label,
+            views: p.views,
+            events: p.events,
+            eventsPerView: p.eventsPerView,
+          }))
+
+          return (
+            <div className="space-y-4">
+              {/* ── Page-level KPI strip ── */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Tracked Pages</p>
+                  <p className="text-2xl font-bold text-white mt-2 tabular-nums">{byLabel.length}</p>
+                  <p className="text-white/30 text-[10px] mt-1">Distinct named pages</p>
+                </div>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Most Engaging</p>
+                  <p className="text-base font-bold text-white mt-2 truncate">
+                    {[...byLabel].sort((a, b) => b.eventsPerView - a.eventsPerView)[0]?.label ?? '—'}
+                  </p>
+                  <p className="text-white/30 text-[10px] mt-1">
+                    {[...byLabel].sort((a, b) => b.eventsPerView - a.eventsPerView)[0]?.eventsPerView ?? 0} events/view
+                  </p>
+                </div>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Legacy Traffic</p>
+                  <p className="text-2xl font-bold text-white mt-2 tabular-nums">{legacyPct}%</p>
+                  <p className="text-white/30 text-[10px] mt-1">Old Webflow URLs · {legacyVsNew.legacyPages} pages</p>
+                </div>
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                  <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Lead-Driving Page</p>
+                  <p className="text-base font-bold text-white mt-2 truncate">
+                    {[...byLabel].filter(p => p.leads > 0).sort((a, b) => b.leads - a.leads)[0]?.label ?? 'None yet'}
+                  </p>
+                  <p className="text-white/30 text-[10px] mt-1">
+                    {[...byLabel].filter(p => p.leads > 0).sort((a, b) => b.leads - a.leads)[0]?.leads ?? 0} lead events
+                  </p>
+                </div>
+              </div>
+
+              {/* ── Top pages bar chart ── */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6">
+                <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Top Pages by Views</h3>
+                    <p className="text-white/30 text-xs mt-0.5">Ranked by total page views across all dates</p>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-white/40">
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: PURPLE }} /> Views</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: BLUE }} /> Events</span>
+                  </div>
+                </div>
+                <ResponsiveContainer width="100%" height={Math.max(280, topPagesDetailed.length * 38)}>
+                  <BarChart data={topPagesDetailed} layout="vertical" margin={{ left: 8, right: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
+                    <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <YAxis dataKey="label" type="category" width={220} tick={{ fill: 'rgba(255,255,255,0.7)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                    <Bar dataKey="views"  name="Views"  fill={PURPLE} radius={[0, 6, 6, 0]} maxBarSize={18} />
+                    <Bar dataKey="events" name="Events" fill={BLUE}   radius={[0, 6, 6, 0]} maxBarSize={18} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* ── Page trends over time (stacked area) ── */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6">
+                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Top 5 Pages Over Time</h3>
+                    <p className="text-white/30 text-xs mt-0.5">Daily page views by top-performing pages</p>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-white/40 flex-wrap">
+                    {top5Labels.map((label, i) => (
+                      <span key={label} className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                        <span className="truncate max-w-[140px]">{label}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <ResponsiveContainer width="100%" height={280}>
+                  <AreaChart data={pagesOverTime}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                    <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                    <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<DarkTooltip />} />
+                    {top5Labels.map((label, i) => (
+                      <Area
+                        key={label}
+                        type="monotone"
+                        dataKey={label}
+                        stackId="1"
+                        name={label}
+                        stroke={PIE_COLORS[i % PIE_COLORS.length]}
+                        fill={PIE_COLORS[i % PIE_COLORS.length]}
+                        fillOpacity={0.6}
+                        strokeWidth={1.5}
+                      />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* ── Detailed performance table ── */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6 overflow-hidden">
+                <h3 className="text-sm font-semibold text-white mb-1">Page Performance Matrix</h3>
+                <p className="text-white/30 text-xs mb-5">Detailed metrics per tracked page</p>
+                <div className="overflow-x-auto -mx-2">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-white/40 text-[10px] uppercase tracking-wider border-b border-white/[0.06]">
+                        <th className="text-left py-3 px-2 font-semibold">Page</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Views</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Users 28d</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Events</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Ev/View</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Leads</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byLabel.map((p, i) => {
+                        const share = totalPageViews > 0 ? (p.views / totalPageViews) * 100 : 0
+                        return (
+                          <tr key={p.label} className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02] transition-colors">
+                            <td className="py-3 px-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/30 text-[10px] w-6 tabular-nums">#{i + 1}</span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-white font-medium truncate">{p.label}</span>
+                                    {p.isLegacy && (
+                                      <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/20 flex-shrink-0">Legacy</span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-white/30 mt-0.5">{p.section}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="text-right py-3 px-2 tabular-nums">
+                              <span className="font-semibold" style={{ color: PURPLE }}>{p.views.toLocaleString()}</span>
+                            </td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{p.users.toLocaleString()}</td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{p.events.toLocaleString()}</td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{p.eventsPerView}</td>
+                            <td className="text-right py-3 px-2 tabular-nums">
+                              {p.leads > 0
+                                ? <span className="font-semibold" style={{ color: GREEN }}>{p.leads}</span>
+                                : <span className="text-white/20">—</span>}
+                            </td>
+                            <td className="text-right py-3 px-2 tabular-nums">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="w-16 h-1 bg-white/[0.05] rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${share}%`, background: PURPLE }} />
+                                </div>
+                                <span className="text-white/60 text-[10px] w-8">{share.toFixed(0)}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {byLabel.length === 0 && (
+                        <tr><td colSpan={7} className="py-8 text-center text-white/30">No page data available yet</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ── Engagement comparison + Legacy split ── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Events per view comparison */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Engagement Depth</h3>
+                  <p className="text-white/30 text-xs mb-4">Events per view — how interactive each page is</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={engagementData} margin={{ left: 8, right: 8, top: 8, bottom: 40 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 9 }}
+                        tickLine={false}
+                        axisLine={false}
+                        angle={-30}
+                        textAnchor="end"
+                        height={50}
+                        interval={0}
+                      />
+                      <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                      <Bar dataKey="eventsPerView" name="Events/View" fill={BLUE} radius={[6, 6, 0, 0]} maxBarSize={28} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Legacy vs new */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Legacy vs New Site</h3>
+                  <p className="text-white/30 text-xs mb-4">How much traffic still hits old Webflow URLs</p>
+
+                  <div className="flex items-center gap-4 mb-5">
+                    <ResponsiveContainer width="40%" height={160}>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'New site', value: legacyVsNew.current },
+                            { name: 'Legacy Webflow', value: legacyVsNew.legacy },
+                          ]}
+                          cx="50%" cy="50%" innerRadius={42} outerRadius={68}
+                          paddingAngle={2} dataKey="value" nameKey="name"
+                        >
+                          <Cell fill={PURPLE} stroke="none" />
+                          <Cell fill="#F97316" stroke="none" />
+                        </Pie>
+                        <Tooltip content={<DarkTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full" style={{ background: PURPLE }} />
+                            <span className="text-white font-medium">New site</span>
+                          </span>
+                          <span className="text-white/60 tabular-nums">{100 - legacyPct}%</span>
+                        </div>
+                        <p className="text-[10px] text-white/30">{legacyVsNew.current.toLocaleString()} views · {legacyVsNew.currentPages} pages</p>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full" style={{ background: '#F97316' }} />
+                            <span className="text-white font-medium">Legacy</span>
+                          </span>
+                          <span className="text-white/60 tabular-nums">{legacyPct}%</span>
+                        </div>
+                        <p className="text-[10px] text-white/30">{legacyVsNew.legacy.toLocaleString()} views · {legacyVsNew.legacyPages} pages</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {legacyPct > 5 && (
+                    <div className="text-[10px] text-orange-400/70 bg-orange-500/5 border border-orange-500/15 rounded-lg p-2.5">
+                      ⚠ {legacyPct}% of traffic still hits old Webflow URLs — consider 301 redirects to the new site map.
+                    </div>
+                  )}
+                  {legacyPct <= 5 && legacyVsNew.legacy > 0 && (
+                    <div className="text-[10px] text-green-400/70 bg-green-500/5 border border-green-500/15 rounded-lg p-2.5">
+                      ✓ Only {legacyPct}% legacy traffic — migration is healthy.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ════════════════════════════════════════════════════════════════════
             GEOGRAPHY TAB
         ════════════════════════════════════════════════════════════════════ */}
-        {tab === 'geo' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 flex flex-col items-center">
-              <h3 className="text-sm font-semibold text-white mb-1 self-start">Audience Distribution</h3>
-              <p className="text-white/30 text-xs mb-4 self-start">By active users (28d)</p>
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie data={countries} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} innerRadius={55} paddingAngle={3}>
-                    {countries.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<DarkTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+        {tab === 'geo' && (() => {
+          // ── Historic city aggregation with engagement ──
+          interface CityAgg { city: string; country: string; users28: number; usersToday: number; views: number; events: number; engagement: number }
+          const cityMap = rows.reduce((acc: Record<string, CityAgg>, r) => {
+            const key = `${r.country}|${r.city}`
+            if (!acc[key]) acc[key] = { city: r.city || 'Unknown', country: r.country || 'Unknown', users28: 0, usersToday: 0, views: 0, events: 0, engagement: 0 }
+            acc[key].users28    += r.active_28_day_users || 0
+            acc[key].usersToday += r.active_1_day_users || 0
+            acc[key].views      += r.screen_page_views || r.page_views || 0
+            acc[key].events     += r.event_count || 0
+            return acc
+          }, {})
+          const historicCities = Object.values(cityMap)
+            .map(c => ({ ...c, engagement: c.views > 0 ? +(c.events / c.views).toFixed(2) : 0 }))
+            .sort((a, b) => b.users28 - a.users28)
 
-            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-1">Country Breakdown</h3>
-              <p className="text-white/30 text-xs mb-6">Percentage of monthly audience</p>
-              <div className="space-y-5">
-                {countries.map((c, i) => {
-                  const pct = totalCountryUsers ? Math.round((c.value / totalCountryUsers) * 100) : 0
-                  return (
-                    <div key={c.name} className="flex items-center gap-3">
-                      <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: PIE_COLORS[i] }} />
-                      <div className="flex-1">
-                        <div className="flex justify-between mb-1.5">
-                          <span className="text-sm text-white font-medium">{c.name}</span>
-                          <span className="text-sm font-semibold" style={{ color: PIE_COLORS[i] }}>{pct}%</span>
-                        </div>
-                        <div className="h-1 bg-white/[0.05] rounded-full">
-                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: PIE_COLORS[i] }} />
-                        </div>
-                      </div>
-                      <span className="text-xs text-white/30 w-20 text-right">{c.value.toLocaleString()} users</span>
+          const totalHistoricUsers = historicCities.reduce((s, c) => s + c.users28, 0)
+          const lastSyncDate = realtime?.syncedAt ? new Date(realtime.syncedAt) : null
+          const minutesAgo = lastSyncDate ? Math.floor((Date.now() - lastSyncDate.getTime()) / 60000) : null
+          const isLive = minutesAgo != null && minutesAgo <= 5
+
+          return (
+            <div className="space-y-4">
+              {/* ════════════════════════════════════════════════════════════
+                  REALTIME SECTION — Live data (last 30 minutes)
+              ════════════════════════════════════════════════════════════ */}
+              <div className="bg-gradient-to-br from-green-500/[0.06] to-emerald-500/[0.02] border border-green-500/[0.15] rounded-2xl p-5 md:p-6">
+                <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <span className={`absolute inset-0 rounded-full ${isLive ? 'animate-ping' : ''} bg-green-400`} />
+                      <span className={`relative block w-2 h-2 rounded-full ${isLive ? 'bg-green-400' : 'bg-orange-400'}`} />
                     </div>
-                  )
-                })}
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">Realtime Traffic</h3>
+                      <p className="text-white/40 text-[10px] mt-0.5">
+                        {isLive ? 'Live · last 30 minutes' : minutesAgo != null ? `Last sync ${minutesAgo}m ago` : 'Waiting for first sync…'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={loadRealtime}
+                    className="text-[10px] uppercase tracking-wider text-white/40 hover:text-white border border-white/10 hover:border-white/30 rounded-lg px-3 py-1.5 transition-colors flex items-center gap-1.5"
+                    title="Refresh now"
+                  >
+                    <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none"><path d="M2 8a6 6 0 1 0 1.5-3.97M2 2v3h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    Refresh
+                  </button>
+                </div>
+
+                {/* Live KPIs */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                  <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Active Now</p>
+                    <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.totalActive ?? 0}</p>
+                    <p className="text-green-400/60 text-[10px] mt-1">users in last 30 min</p>
+                  </div>
+                  <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Views / 30 min</p>
+                    <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.totalViews ?? 0}</p>
+                    <p className="text-white/30 text-[10px] mt-1">page views</p>
+                  </div>
+                  <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Countries Live</p>
+                    <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.byCountry.length ?? 0}</p>
+                    <p className="text-white/30 text-[10px] mt-1">distinct regions</p>
+                  </div>
+                  <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Cities Live</p>
+                    <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.byCity.length ?? 0}</p>
+                    <p className="text-white/30 text-[10px] mt-1">unique cities</p>
+                  </div>
+                </div>
+
+                {/* Live country + city breakdown */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
+                    <h4 className="text-xs font-semibold text-white mb-3 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                      Active by Country
+                    </h4>
+                    {realtime && realtime.byCountry.length > 0 ? (
+                      <div className="space-y-2.5">
+                        {realtime.byCountry.slice(0, 8).map((c, i) => {
+                          const pct = realtime.totalActive > 0 ? Math.round((c.active_users / realtime.totalActive) * 100) : 0
+                          return (
+                            <div key={c.country} className="flex items-center gap-3">
+                              <span className="w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center"
+                                style={{ background: `${PIE_COLORS[i % PIE_COLORS.length]}25`, color: PIE_COLORS[i % PIE_COLORS.length] }}>
+                                {i + 1}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between text-xs">
+                                  <span className="text-white font-medium truncate">{c.country}</span>
+                                  <span className="text-white/40 tabular-nums">{pct}% · {c.active_users}</span>
+                                </div>
+                                <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden mt-1">
+                                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                                </div>
+                              </div>
+                              <span className="text-[10px] text-white/30">{c.city_count} {c.city_count === 1 ? 'city' : 'cities'}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-white/30 text-xs py-4">No live traffic — waiting for GA4 sync…</p>
+                    )}
+                  </div>
+
+                  <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
+                    <h4 className="text-xs font-semibold text-white mb-3 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                      Active by City
+                    </h4>
+                    {realtime && realtime.byCity.length > 0 ? (
+                      <div className="space-y-2">
+                        {realtime.byCity.slice(0, 10).map((c, i) => (
+                          <div key={`${c.country}-${c.city}-${i}`} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-white/30 text-[10px] tabular-nums w-4">#{i + 1}</span>
+                              <div className="min-w-0">
+                                <p className="text-xs text-white font-medium truncate">{c.city}</p>
+                                <p className="text-[10px] text-white/30">{c.country}</p>
+                              </div>
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-2">
+                              <p className="text-xs font-semibold tabular-nums text-green-400">{c.active_users}</p>
+                              <p className="text-[10px] text-white/30 tabular-nums">{c.views} views</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-white/30 text-xs py-4">No live cities — waiting for GA4 sync…</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ════════════════════════════════════════════════════════════
+                  HISTORIC: Country distribution
+              ════════════════════════════════════════════════════════════ */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 flex flex-col items-center">
+                  <h3 className="text-sm font-semibold text-white mb-1 self-start">Audience Distribution</h3>
+                  <p className="text-white/30 text-xs mb-4 self-start">By active users (28d window)</p>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie data={countries} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} innerRadius={55} paddingAngle={3}>
+                        {countries.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip content={<DarkTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Country Breakdown</h3>
+                  <p className="text-white/30 text-xs mb-6">Percentage of monthly audience</p>
+                  <div className="space-y-5">
+                    {countries.map((c, i) => {
+                      const pct = totalCountryUsers ? Math.round((c.value / totalCountryUsers) * 100) : 0
+                      return (
+                        <div key={c.name} className="flex items-center gap-3">
+                          <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: PIE_COLORS[i] }} />
+                          <div className="flex-1">
+                            <div className="flex justify-between mb-1.5">
+                              <span className="text-sm text-white font-medium">{c.name}</span>
+                              <span className="text-sm font-semibold" style={{ color: PIE_COLORS[i] }}>{pct}%</span>
+                            </div>
+                            <div className="h-1 bg-white/[0.05] rounded-full">
+                              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: PIE_COLORS[i] }} />
+                            </div>
+                          </div>
+                          <span className="text-xs text-white/30 w-20 text-right">{c.value.toLocaleString()} users</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* ════════════════════════════════════════════════════════════
+                  ENHANCED TOP CITIES TABLE
+              ════════════════════════════════════════════════════════════ */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6 overflow-hidden">
+                <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Top Cities · Full Breakdown</h3>
+                    <p className="text-white/30 text-xs mt-0.5">All cities with engagement metrics from last 30 days</p>
+                  </div>
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">{historicCities.length} cities</span>
+                </div>
+                <div className="overflow-x-auto -mx-2 mt-5">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-white/40 text-[10px] uppercase tracking-wider border-b border-white/[0.06]">
+                        <th className="text-left py-3 px-2 font-semibold">City</th>
+                        <th className="text-left py-3 px-2 font-semibold">Country</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Live</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Users 28d</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Users 1d</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Page Views</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Events</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Ev/View</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historicCities.map((c, i) => {
+                        const share = totalHistoricUsers > 0 ? (c.users28 / totalHistoricUsers) * 100 : 0
+                        const liveUsers = realtime?.byCity.find(rc => rc.city === c.city && rc.country === c.country)?.active_users ?? 0
+                        return (
+                          <tr key={`${c.country}-${c.city}-${i}`} className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02] transition-colors">
+                            <td className="py-3 px-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white/30 text-[10px] w-5 tabular-nums">#{i + 1}</span>
+                                <span className="text-white font-medium">{c.city}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-2 text-white/60">{c.country}</td>
+                            <td className="text-right py-3 px-2 tabular-nums">
+                              {liveUsers > 0 ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 text-[10px] font-semibold">
+                                  <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
+                                  {liveUsers}
+                                </span>
+                              ) : <span className="text-white/20">—</span>}
+                            </td>
+                            <td className="text-right py-3 px-2 tabular-nums">
+                              <span className="font-semibold" style={{ color: PURPLE }}>{c.users28.toLocaleString()}</span>
+                            </td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{c.usersToday.toLocaleString()}</td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{c.views.toLocaleString()}</td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{c.events.toLocaleString()}</td>
+                            <td className="text-right py-3 px-2 tabular-nums text-white/70">{c.engagement}</td>
+                            <td className="text-right py-3 px-2 tabular-nums">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="w-14 h-1 bg-white/[0.05] rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${share}%`, background: PURPLE }} />
+                                </div>
+                                <span className="text-white/60 text-[10px] w-8 tabular-nums">{share.toFixed(0)}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {historicCities.length === 0 && (
+                        <tr><td colSpan={9} className="py-8 text-center text-white/30">No city data yet</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ════════════════════════════════════════════════════════════════════
             GOOGLE ADS TAB
