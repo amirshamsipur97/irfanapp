@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
       clicks:                   Number(r.clicks ?? 0),
       impressions:              Number(r.impressions ?? 0),
       cost:                     Number(r.cost ?? 0),
+      conversions:              Number(r.conversions ?? 0),
       ctr:                      Number(r.ctr ?? 0),
       average_cpc:              Number(r.average_cpc ?? 0),
       average_cpm:              Number(r.average_cpm ?? 0),

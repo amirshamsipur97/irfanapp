@@ -26,6 +26,7 @@ export interface AdsRow {
   clicks: number
   impressions: number
   cost: number
+  conversions: number
   ctr: number
   average_cpc: number
   average_cpm: number
