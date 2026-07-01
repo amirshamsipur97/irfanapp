@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { categorizePath } from '@/lib/siteMap'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -176,7 +176,7 @@ export default function Dashboard() {
   const [analysisResp, setAnalysisResp] = useState<AnalysisResponse | null>(null)
   const [loadingAnalysis, setLoadingAnalysis] = useState(false)
   const [analysisError, setAnalysisError]     = useState<string | null>(null)
-  const [tab, setTab] = useState<'overview'|'pages'|'geo'|'ads'|'ai'|'leads'|'calls'>('overview')
+  const [tab, setTab] = useState<'marketing'|'pages'|'geo'|'ads'|'ai'|'form-leads'|'convos'|'qualified'|'combined'|'calls'|'voice'>('marketing')
   const analysis = analysisResp?.analysis ?? null
 
   // ── Leads state ─────────────────────────────────────────────────────────────
@@ -209,8 +209,43 @@ export default function Dashboard() {
   interface RealtimeRow { country: string; city: string; page_path: string | null; device: string | null; source: string | null; active_users: number; views_30min: number; synced_at: string }
   interface RealtimeCountry { country: string; active_users: number; city_count: number }
   interface RealtimeCity { city: string; country: string; active_users: number; views: number }
-  interface RealtimeStore { syncedAt: string | null; totalActive: number; totalViews: number; byCountry: RealtimeCountry[]; byCity: RealtimeCity[]; raw: RealtimeRow[] }
+  interface RealtimeStore {
+    mode?: 'live' | 'fallback_daily' | 'empty'
+    syncedAt: string | null
+    fallbackDate?: string | null
+    totalActive: number
+    totalViews: number
+    byCountry: RealtimeCountry[]
+    byCity: RealtimeCity[]
+    raw: RealtimeRow[]
+    note?: string
+  }
   const [realtime, setRealtime] = useState<RealtimeStore | null>(null)
+
+  // ── AI Conversations state ──────────────────────────────────────────────────
+  interface ConvoRow {
+    id: number; conversation_id: string | null; session_id: string | null
+    user_message: string | null; ai_response: string | null; summary: string | null
+    language: string | null; project_interest: string | null; mentioned_developer: string | null
+    intent: string | null; urgency: string | null; lead_score: number | null
+    lead_status: string | null; qualified: boolean | null; has_contact_info: boolean | null
+    user_name: string | null; user_email: string | null; user_phone: string | null
+    message_count: number | null; duration_seconds: number | null
+    started_at: string | null; page_url: string | null
+  }
+  interface ConvosStore {
+    total: number; uniqueSessions: number; qualifiedCount: number; withContact: number
+    byLanguage: { language: string; count: number }[]
+    byProject:  { project: string; count: number }[]
+    byIntent:   { intent: string; count: number }[]
+    byDay:      { date: string; count: number }[]
+    scoreBuckets: Record<string, number>
+    recent: ConvoRow[]
+  }
+  const [convos, setConvos] = useState<ConvosStore | null>(null)
+  const [expandedConvo, setExpandedConvo] = useState<number | null>(null)
+  const [convoSort, setConvoSort] = useState<'recent' | 'score' | 'qualified'>('qualified')
+  const [convoFilter, setConvoFilter] = useState<'all' | 'qualified' | 'contact' | 'real'>('real')
 
   const loadData = () =>
     fetch('/api/data').then(r => r.json()).then((d: GA4Store) => setStore(d))
@@ -219,6 +254,12 @@ export default function Dashboard() {
     fetch('/api/realtime', { cache: 'no-store' })
       .then(r => r.json())
       .then((d: RealtimeStore) => setRealtime(d))
+      .catch(() => {})
+
+  const loadConvos = () =>
+    fetch('/api/conversations', { cache: 'no-store' })
+      .then(r => r.json())
+      .then((d: ConvosStore) => setConvos(d))
       .catch(() => {})
 
   const loadLeads = (p = 1) => {
@@ -262,9 +303,14 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (tab === 'leads') loadLeads(1)
+    if (tab === 'combined' || tab === 'form-leads' || tab === 'qualified') loadLeads(1)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, leadsSearch, leadsQuality, leadsCountry, leadsProperty, leadsSheet])
+
+  useEffect(() => {
+    if (tab === 'convos' || tab === 'combined') loadConvos()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
 
   const loadCalls = (p = 1) => {
     setCallsLoading(true); setCallsError(null)
@@ -361,13 +407,17 @@ export default function Dashboard() {
   const totalCountryUsers = countries.reduce((s, c) => s + c.value, 0)
 
   const TABS = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'pages',    label: 'Top Pages' },
-    { id: 'geo',      label: 'Geography' },
-    { id: 'ads',      label: '📢 Google Ads' },
-    { id: 'leads',    label: '👥 Leads CRM' },
-    { id: 'calls',    label: '📞 Calls' },
-    { id: 'ai',       label: '✦ AI Insights' },
+    { id: 'marketing', label: '📊 Marketing' },
+    { id: 'pages',     label: 'Top Pages' },
+    { id: 'geo',       label: 'Geography' },
+    { id: 'ads',       label: '📢 Google Ads' },
+    { id: 'form-leads',label: '📝 Form Leads' },
+    { id: 'convos',    label: '💬 AI Convos' },
+    { id: 'qualified', label: '✦ Qualified AI' },
+    { id: 'combined',  label: '👥 Combined' },
+    { id: 'calls',     label: '📞 Calls' },
+    { id: 'voice',     label: '🎙 Voice' },
+    { id: 'ai',        label: '🧠 AI Insights' },
   ] as const
 
   return (
@@ -426,14 +476,24 @@ export default function Dashboard() {
           <p className="text-white/30 text-sm mt-1">irfaninvest.com · Oman luxury real estate</p>
         </div>
 
-        {/* ── KPI Cards ───────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <KpiCard label="Page Views"    value={fmtNum(totalViews)}       sub="Last 30 days"        accent={PURPLE} />
-          <KpiCard label="Active Today"  value={fmtNum(totalActiveToday)} sub="Last 24 hours"       accent={GOLD}   />
-          <KpiCard label="Active (28d)"  value={fmtNum(totalUsers28)}     sub="Monthly audience"    accent={PURPLE} />
-          <KpiCard label="Events"        value={fmtNum(totalEvents)}      sub="User interactions"   accent={BLUE}   />
-          <KpiCard label="Leads"         value={fmtNum(totalLeads)}       sub="generate_lead events" accent={GREEN} />
-        </div>
+        {/* ── KPI Cards · GA4 + Google Ads combined ─────────────────────── */}
+        {(() => {
+          const adsTotalClicks      = ads.reduce((s, r) => s + Number(r.clicks ?? 0), 0)
+          const adsTotalImpressions = ads.reduce((s, r) => s + Number(r.impressions ?? 0), 0)
+          const adsTotalCost        = ads.reduce((s, r) => s + Number(r.cost ?? 0), 0)
+          const adsCtr              = adsTotalImpressions > 0 ? (adsTotalClicks / adsTotalImpressions) * 100 : 0
+          const costPerLead         = totalLeads > 0 ? (adsTotalCost / totalLeads) : 0
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              <KpiCard label="Page Views"    value={fmtNum(totalViews)}       sub="Last 30 days"        accent={PURPLE} />
+              <KpiCard label="Users (28d)"   value={fmtNum(totalUsers28)}     sub="Monthly audience"    accent={PURPLE} />
+              <KpiCard label="Events"        value={fmtNum(totalEvents)}      sub="User interactions"   accent={BLUE}   />
+              <KpiCard label="GA4 Leads"     value={fmtNum(totalLeads)}       sub="generate_lead events" accent={GREEN} />
+              <KpiCard label="Ads Clicks"    value={fmtNum(adsTotalClicks)}   sub={`CTR ${adsCtr.toFixed(2)}%`} accent={GOLD}   />
+              <KpiCard label="Cost / Lead"   value={costPerLead > 0 ? `$${costPerLead.toFixed(0)}` : '—'} sub={`$${adsTotalCost.toFixed(0)} spent`} accent={'#22D3EE'} />
+            </div>
+          )
+        })()}
 
         {/* ── Tab bar ─────────────────────────────────────────────────────── */}
         <div className="flex gap-1 p-1 bg-white/[0.03] border border-white/[0.06] rounded-2xl w-fit flex-wrap">
@@ -456,7 +516,7 @@ export default function Dashboard() {
         {/* ════════════════════════════════════════════════════════════════════
             OVERVIEW TAB — Enhanced analytical view
         ════════════════════════════════════════════════════════════════════ */}
-        {tab === 'overview' && (() => {
+        {tab === 'marketing' && (() => {
           // ── Build extra GA4 aggregations for this tab only ──
           const byDateFull = Object.entries(
             rows.reduce((acc: Record<string, { pageViews: number; users: number; events: number; leads: number }>, r) => {
@@ -1058,28 +1118,60 @@ export default function Dashboard() {
             .sort((a, b) => b.users28 - a.users28)
 
           const totalHistoricUsers = historicCities.reduce((s, c) => s + c.users28, 0)
+          const mode = realtime?.mode ?? 'empty'
           const lastSyncDate = realtime?.syncedAt ? new Date(realtime.syncedAt) : null
-          const minutesAgo = lastSyncDate ? Math.floor((Date.now() - lastSyncDate.getTime()) / 60000) : null
-          const isLive = minutesAgo != null && minutesAgo <= 5
+          const minutesAgo = lastSyncDate && mode === 'live'
+            ? Math.floor((Date.now() - lastSyncDate.getTime()) / 60000)
+            : null
+          const isLive = mode === 'live' && minutesAgo != null && minutesAgo <= 5
+          const isFallback = mode === 'fallback_daily'
+          const isEmpty = mode === 'empty' || !realtime
+          const hasAnyData = (realtime?.totalActive ?? 0) > 0 || (realtime?.byCity?.length ?? 0) > 0
+
+          // Visual tokens depend on mode
+          const accent = isLive ? '#10B981' : isFallback ? '#F59E0B' : '#6B7280'
+          const sectionLabel = isLive
+            ? 'Realtime Traffic'
+            : isFallback
+            ? `Recent Traffic · ${realtime?.fallbackDate ?? 'today'} (daily approximation)`
+            : 'Realtime Traffic'
+          const sectionSub = isLive
+            ? 'Live · last 30 minutes'
+            : isFallback
+            ? 'Realtime pipeline not connected — showing today\'s GA4 daily as fallback'
+            : 'No GA4 data — connect n8n ingestion to start'
 
           return (
             <div className="space-y-4">
               {/* ════════════════════════════════════════════════════════════
-                  REALTIME SECTION — Live data (last 30 minutes)
+                  REALTIME / RECENT SECTION
               ════════════════════════════════════════════════════════════ */}
-              <div className="bg-gradient-to-br from-green-500/[0.06] to-emerald-500/[0.02] border border-green-500/[0.15] rounded-2xl p-5 md:p-6">
+              <div
+                className="rounded-2xl p-5 md:p-6 border"
+                style={{
+                  background: isLive
+                    ? 'linear-gradient(135deg, rgba(16,185,129,0.06), rgba(16,185,129,0.02))'
+                    : isFallback
+                    ? 'linear-gradient(135deg, rgba(245,158,11,0.06), rgba(245,158,11,0.02))'
+                    : 'rgba(255,255,255,0.04)',
+                  borderColor: isLive ? 'rgba(16,185,129,0.18)' : isFallback ? 'rgba(245,158,11,0.18)' : 'rgba(255,255,255,0.08)',
+                }}
+              >
                 <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <span className={`absolute inset-0 rounded-full ${isLive ? 'animate-ping' : ''} bg-green-400`} />
-                      <span className={`relative block w-2 h-2 rounded-full ${isLive ? 'bg-green-400' : 'bg-orange-400'}`} />
+                      {isLive && <span className="absolute inset-0 rounded-full animate-ping" style={{ background: accent }} />}
+                      <span className="relative block w-2 h-2 rounded-full" style={{ background: accent }} />
                     </div>
                     <div>
-                      <h3 className="text-sm font-semibold text-white">Realtime Traffic</h3>
-                      <p className="text-white/40 text-[10px] mt-0.5">
-                        {isLive ? 'Live · last 30 minutes' : minutesAgo != null ? `Last sync ${minutesAgo}m ago` : 'Waiting for first sync…'}
-                      </p>
+                      <h3 className="text-sm font-semibold text-white">{sectionLabel}</h3>
+                      <p className="text-white/40 text-[10px] mt-0.5">{sectionSub}</p>
                     </div>
+                    {/* Mode badge */}
+                    <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold"
+                      style={{ background: `${accent}22`, color: accent }}>
+                      {isLive ? 'LIVE' : isFallback ? 'DAILY' : 'OFFLINE'}
+                    </span>
                   </div>
                   <button
                     onClick={loadRealtime}
@@ -1091,25 +1183,45 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                {/* Live KPIs */}
+                {/* Setup hint when truly empty */}
+                {isEmpty && !hasAnyData && (
+                  <div className="bg-black/30 border border-white/[0.06] rounded-xl p-4 mb-4 text-xs">
+                    <p className="text-white/80 font-semibold mb-2 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                      How to enable live traffic
+                    </p>
+                    <ol className="text-white/55 space-y-1.5 ml-3.5 list-decimal">
+                      <li>Confirm n8n GA4 schedule trigger is <span className="text-white">active</span> (every 30 min)</li>
+                      <li>Add a 2-min schedule + HTTP node calling <code className="text-purple-300 bg-purple-500/10 px-1 rounded">GA4 runRealtimeReport</code> → POST <code className="text-purple-300 bg-purple-500/10 px-1 rounded">/api/webhook/ga4-realtime</code></li>
+                      <li>Or provide a Google Service Account JSON and we&apos;ll poll the GA4 Realtime API directly from Vercel</li>
+                    </ol>
+                  </div>
+                )}
+
+                {/* Fallback note */}
+                {isFallback && realtime?.note && (
+                  <p className="text-amber-300/80 text-[11px] mb-4 px-2">⚠ {realtime.note}</p>
+                )}
+
+                {/* KPIs — labels adapt to mode */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
                   <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
-                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Active Now</p>
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">{isLive ? 'Active Now' : isFallback ? 'Active Today' : 'Active'}</p>
                     <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.totalActive ?? 0}</p>
-                    <p className="text-green-400/60 text-[10px] mt-1">users in last 30 min</p>
+                    <p className="text-[10px] mt-1" style={{ color: `${accent}99` }}>{isLive ? 'users in last 30 min' : isFallback ? 'GA4 1-day active users' : 'no data'}</p>
                   </div>
                   <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
-                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Views / 30 min</p>
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">{isLive ? 'Views / 30 min' : isFallback ? 'Views Today' : 'Page Views'}</p>
                     <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.totalViews ?? 0}</p>
                     <p className="text-white/30 text-[10px] mt-1">page views</p>
                   </div>
                   <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
-                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Countries Live</p>
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Countries</p>
                     <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.byCountry.length ?? 0}</p>
                     <p className="text-white/30 text-[10px] mt-1">distinct regions</p>
                   </div>
                   <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
-                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Cities Live</p>
+                    <p className="text-white/40 text-[10px] uppercase tracking-[0.15em] font-semibold">Cities</p>
                     <p className="text-3xl font-bold text-white mt-2 tabular-nums">{realtime?.byCity.length ?? 0}</p>
                     <p className="text-white/30 text-[10px] mt-1">unique cities</p>
                   </div>
@@ -1119,8 +1231,8 @@ export default function Dashboard() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
                     <h4 className="text-xs font-semibold text-white mb-3 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                      Active by Country
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent, animation: isLive ? 'pulse 2s infinite' : 'none' }} />
+                      {isLive ? 'Active by Country' : isFallback ? 'Today\'s Traffic by Country' : 'Active by Country'}
                     </h4>
                     {realtime && realtime.byCountry.length > 0 ? (
                       <div className="space-y-2.5">
@@ -1147,14 +1259,14 @@ export default function Dashboard() {
                         })}
                       </div>
                     ) : (
-                      <p className="text-white/30 text-xs py-4">No live traffic — waiting for GA4 sync…</p>
+                      <p className="text-white/30 text-xs py-4">{isEmpty ? 'No GA4 data — see setup steps above' : 'No traffic in this window'}</p>
                     )}
                   </div>
 
                   <div className="bg-black/30 border border-white/[0.05] rounded-xl p-4">
                     <h4 className="text-xs font-semibold text-white mb-3 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                      Active by City
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent, animation: isLive ? 'pulse 2s infinite' : 'none' }} />
+                      {isLive ? 'Active by City' : isFallback ? 'Today\'s Traffic by City' : 'Active by City'}
                     </h4>
                     {realtime && realtime.byCity.length > 0 ? (
                       <div className="space-y-2">
@@ -1168,14 +1280,14 @@ export default function Dashboard() {
                               </div>
                             </div>
                             <div className="text-right flex-shrink-0 ml-2">
-                              <p className="text-xs font-semibold tabular-nums text-green-400">{c.active_users}</p>
+                              <p className="text-xs font-semibold tabular-nums" style={{ color: accent }}>{c.active_users}</p>
                               <p className="text-[10px] text-white/30 tabular-nums">{c.views} views</p>
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-white/30 text-xs py-4">No live cities — waiting for GA4 sync…</p>
+                      <p className="text-white/30 text-xs py-4">{isEmpty ? 'No GA4 data — see setup steps above' : 'No cities active in this window'}</p>
                     )}
                   </div>
                 </div>
@@ -1537,9 +1649,611 @@ export default function Dashboard() {
         })()}
 
         {/* ════════════════════════════════════════════════════════════════════
-            LEADS CRM TAB
+            FORM LEADS TAB — website leads (name/email/phone/project)
         ════════════════════════════════════════════════════════════════════ */}
-        {tab === 'leads' && (() => {
+        {tab === 'form-leads' && (() => {
+          const allLeads = leadsStore?.leads ?? []
+          const formLeads = allLeads.filter(l => (l.source_sheet ?? '').toLowerCase().includes('form_property_db') || (l.source_sheet ?? '').toLowerCase() === 'form_leads' || (l.source ?? '').toLowerCase() === 'form_leads')
+
+          if (!leadsStore) return (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-20 text-center">
+              <div className="inline-block w-8 h-8 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin mb-3" />
+              <p className="text-white/40 text-sm">Loading form leads…</p>
+            </div>
+          )
+
+          if (formLeads.length === 0) return (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-20 text-center">
+              <div className="text-3xl mb-3">📝</div>
+              <p className="text-white font-semibold">No form leads yet</p>
+              <p className="text-white/40 text-sm mt-1">Submissions from the website forms will appear here.</p>
+            </div>
+          )
+
+          const today = new Date().toISOString().slice(0, 10)
+          const todayCount = formLeads.filter(l => (l.inserted_at ?? '').slice(0, 10) === today).length
+
+          // Group by project/developer/property/purpose/language — extract from raw_data when available
+          const groupBy = (key: string) => {
+            const counts: Record<string, number> = {}
+            formLeads.forEach(l => {
+              type RawData = { project?: string; developer?: string; property_type?: string; purpose?: string; language?: string } | null
+              const raw = (l as unknown as { raw_data?: RawData }).raw_data || null
+              const val = raw?.[key as keyof RawData] || (key === 'language' ? l.language : null) || 'Unknown'
+              const k = String(val).trim() || 'Unknown'
+              counts[k] = (counts[k] || 0) + 1
+            })
+            return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count }))
+          }
+
+          const byProject  = groupBy('project')
+          const byDev      = groupBy('developer')
+          const byType     = groupBy('property_type')
+          const byPurpose  = groupBy('purpose')
+          const byLang     = groupBy('language')
+
+          const Pill = ({ data, accent, title }: { data: { name: string; count: number }[]; accent: string; title: string }) => (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+              <h4 className="text-xs font-semibold text-white mb-4">{title}</h4>
+              <div className="space-y-2.5">
+                {data.length === 0 ? <p className="text-white/30 text-xs">No data yet</p> :
+                  data.map((d, i) => {
+                    const pct = formLeads.length > 0 ? Math.round((d.count / formLeads.length) * 100) : 0
+                    return (
+                      <div key={d.name}>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-white truncate max-w-[180px]">{d.name}</span>
+                          <span className="text-white/40 tabular-nums">{pct}% · {d.count}</span>
+                        </div>
+                        <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: i === 0 ? accent : `${accent}80` }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            </div>
+          )
+
+          return (
+            <div className="space-y-4">
+              {/* KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <KpiCard label="Total Form Leads" value={fmtNum(formLeads.length)} sub="All-time submissions" accent={PURPLE} />
+                <KpiCard label="New Today" value={fmtNum(todayCount)} sub="Last 24 hours" accent={GREEN} />
+                <KpiCard label="With Email" value={fmtNum(formLeads.filter(l => l.email).length)} sub="Reachable by mail" accent={BLUE} />
+                <KpiCard label="With Phone" value={fmtNum(formLeads.filter(l => l.phone).length)} sub="Reachable by call" accent={GOLD} />
+              </div>
+
+              {/* Distributions grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Pill data={byProject} accent={PURPLE} title="Leads by Project" />
+                <Pill data={byDev}     accent={GOLD}   title="Leads by Developer" />
+                <Pill data={byType}    accent={BLUE}   title="Leads by Property Type" />
+                <Pill data={byPurpose} accent={GREEN}  title="Leads by Purpose" />
+                <Pill data={byLang}    accent={'#22D3EE'} title="Leads by Language" />
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h4 className="text-xs font-semibold text-white mb-4">Status</h4>
+                  <div className="space-y-2">
+                    <p className="text-xs text-white/60">✓ AI pipeline ingesting form leads</p>
+                    <p className="text-xs text-white/60">✓ Deduplication active (email/phone)</p>
+                    <p className="text-xs text-white/60">✓ Rich fields preserved in raw_data</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recent table */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6 overflow-hidden">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Recent Form Leads</h3>
+                    <p className="text-white/30 text-xs mt-0.5">Latest submissions from the website</p>
+                  </div>
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">{formLeads.length} total</span>
+                </div>
+                <div className="overflow-x-auto -mx-2">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-white/40 text-[10px] uppercase tracking-wider border-b border-white/[0.06]">
+                        <th className="text-left py-3 px-2 font-semibold">Name</th>
+                        <th className="text-left py-3 px-2 font-semibold">Email · Phone</th>
+                        <th className="text-left py-3 px-2 font-semibold">Property Interest</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Budget</th>
+                        <th className="text-right py-3 px-2 font-semibold">Created</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formLeads.slice(0, 30).map(l => (
+                        <tr key={l.id} className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 px-2 text-white font-medium">{l.full_name ?? <span className="text-white/30">—</span>}</td>
+                          <td className="py-3 px-2 text-white/70">
+                            <div className="truncate max-w-[200px]">{l.email ?? <span className="text-white/30">—</span>}</div>
+                            <div className="text-[10px] text-white/40">{l.phone ?? '—'}</div>
+                          </td>
+                          <td className="py-3 px-2 text-white/70">
+                            <div className="truncate max-w-[260px]">{l.property_interest ?? <span className="text-white/30">—</span>}</div>
+                          </td>
+                          <td className="text-right py-3 px-2 tabular-nums text-white/70">{l.budget ?? <span className="text-white/30">—</span>}</td>
+                          <td className="text-right py-3 px-2 text-[10px] text-white/40 tabular-nums">{(l.inserted_at ?? l.created_at ?? '').slice(0, 10)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            AI CONVERSATIONS TAB — every user chat with the AI agent
+        ════════════════════════════════════════════════════════════════════ */}
+        {tab === 'convos' && (() => {
+          if (!convos) return (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-20 text-center">
+              <div className="inline-block w-8 h-8 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin mb-3" />
+              <p className="text-white/40 text-sm">Loading conversations…</p>
+            </div>
+          )
+
+          if (convos.total === 0) return (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-20 text-center">
+              <div className="text-3xl mb-3">💬</div>
+              <p className="text-white font-semibold">No AI conversations yet</p>
+              <p className="text-white/40 text-sm mt-1 max-w-md mx-auto">Every chat between users and the AI agent will land here — including tests, general questions, and exploratory messages.</p>
+            </div>
+          )
+
+          // ── Helper: detect when text is an AI explanation, not a real project name ──
+          // The n8n agent currently overflows summary text into project_interest. This
+          // defensively filters out those long sentence-like values so the dashboard
+          // shows real project mentions only.
+          const isExplanation = (s: string | null | undefined): boolean => {
+            if (!s) return true
+            const t = s.trim()
+            if (t.length > 60) return true                       // too long for a project name
+            if (t.split(/\s+/).length > 6) return true           // more than 6 words
+            if (/[.!?]$/.test(t)) return true                    // ends in sentence punctuation
+            const phrases = [
+              /the conversation/i, /lacks any/i, /no clear/i, /not qualified/i,
+              /no information/i, /no specific/i, /does not (contain|indicate|show)/i,
+              /no meaningful/i, /no buying/i, /no investment/i, /no relevant/i,
+              /no identifying/i, /no real/i, /no inquiries/i, /no intent/i,
+              /devoid of/i, /no substance/i, /not provide/i, /no form of/i,
+            ]
+            return phrases.some(re => re.test(t))
+          }
+          const cleanProject = (s: string | null | undefined) => isExplanation(s) ? null : s
+
+          const qualifiedRate = convos.total > 0 ? Math.round((convos.qualifiedCount / convos.total) * 100) : 0
+          const contactRate   = convos.total > 0 ? Math.round((convos.withContact   / convos.total) * 100) : 0
+
+          // Filter out AI explanations from project rankings — keep only real mentions
+          const realProjects = convos.byProject.filter(p => !isExplanation(p.project))
+          const noisyProjectCount = convos.byProject.length - realProjects.length
+
+          // Build the conversation list with filter & sort
+          let workingList = convos.recent.map(c => ({ ...c, _realProject: cleanProject(c.project_interest) }))
+          if (convoFilter === 'qualified')    workingList = workingList.filter(c => c.qualified === true)
+          else if (convoFilter === 'contact') workingList = workingList.filter(c => c.has_contact_info === true)
+          else if (convoFilter === 'real')    workingList = workingList.filter(c => c._realProject || c.qualified === true || c.has_contact_info === true)
+
+          // Rank
+          if (convoSort === 'score')      workingList.sort((a, b) => Number(b.lead_score ?? 0) - Number(a.lead_score ?? 0))
+          else if (convoSort === 'qualified') workingList.sort((a, b) => Number(b.qualified ? 1 : 0) - Number(a.qualified ? 1 : 0) || Number(b.lead_score ?? 0) - Number(a.lead_score ?? 0))
+          else workingList.sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? ''))
+
+          return (
+            <div className="space-y-4">
+              {/* KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <KpiCard label="Total Conversations" value={fmtNum(convos.total)} sub="All user sessions" accent={PURPLE} />
+                <KpiCard label="Unique Sessions" value={fmtNum(convos.uniqueSessions)} sub="Distinct users" accent={BLUE} />
+                <KpiCard label="Qualified Rate" value={`${qualifiedRate}%`} sub={`${convos.qualifiedCount} qualified`} accent={GREEN} />
+                <KpiCard label="Left Contact Info" value={`${contactRate}%`} sub={`${convos.withContact} with email/phone`} accent={GOLD} />
+              </div>
+
+              {/* Data-quality note */}
+              {noisyProjectCount > 0 && (
+                <div className="bg-orange-500/[0.06] border border-orange-500/[0.18] rounded-2xl px-4 py-3 flex items-start gap-3">
+                  <span className="text-orange-400 text-base leading-none mt-0.5">⚠</span>
+                  <div className="text-xs">
+                    <p className="text-orange-200 font-semibold mb-1">Data quality issue from n8n</p>
+                    <p className="text-orange-200/70 leading-relaxed">
+                      The AI agent is writing explanation sentences into <code className="bg-orange-500/10 px-1 rounded text-orange-300">project_interest</code> instead of project names —
+                      we filtered out <span className="font-semibold">{noisyProjectCount}</span> noisy values.{' '}
+                      Fix the prompt in the n8n &quot;Qualify Voice Lead / Qualify Conversation&quot; node so it emits
+                      <code className="bg-orange-500/10 px-1 mx-1 rounded text-orange-300">project_interest</code> ONLY when a real project is mentioned, otherwise null.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Volume + Languages */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 lg:col-span-2">
+                  <h3 className="text-sm font-semibold text-white mb-1">Conversation Volume Over Time</h3>
+                  <p className="text-white/30 text-xs mb-4">Daily conversation count</p>
+                  {convos.byDay.length === 0 ? <p className="text-white/30 text-xs py-8">No daily data yet</p> :
+                    <ResponsiveContainer width="100%" height={220}>
+                      <AreaChart data={convos.byDay}>
+                        <defs>
+                          <linearGradient id="gConvo" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={PURPLE} stopOpacity={0.4} />
+                            <stop offset="95%" stopColor={PURPLE} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                        <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                        <Tooltip content={<DarkTooltip />} />
+                        <Area type="monotone" dataKey="count" name="Conversations" stroke={PURPLE} strokeWidth={2} fill="url(#gConvo)" dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>}
+                </div>
+
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Conversations by Language</h3>
+                  <p className="text-white/30 text-xs mb-4">Top languages used</p>
+                  <div className="space-y-2.5">
+                    {convos.byLanguage.slice(0, 6).map((l, i) => {
+                      const pct = convos.total > 0 ? Math.round((l.count / convos.total) * 100) : 0
+                      return (
+                        <div key={l.language}>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-white">{l.language}</span>
+                            <span className="text-white/40 tabular-nums">{pct}% · {l.count}</span>
+                          </div>
+                          <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Top mentioned projects — filtered to REAL names only */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-1">Top Mentioned Projects</h3>
+                <p className="text-white/30 text-xs mb-4">Real project names only (AI explanations filtered out)</p>
+                {realProjects.length === 0 ? (
+                  <div className="py-6 text-center">
+                    <p className="text-white/40 text-xs">No real project mentions yet</p>
+                    <p className="text-white/30 text-[10px] mt-1">When users ask about Aida, Maison Shirdel, etc., they will appear here</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={Math.max(140, realProjects.length * 34)}>
+                    <BarChart data={realProjects} layout="vertical" margin={{ left: 8, right: 40 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
+                      <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis dataKey="project" type="category" width={180} tick={{ fill: 'rgba(255,255,255,0.7)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                      <Bar dataKey="count" name="Mentions" fill={PURPLE} radius={[0, 6, 6, 0]} maxBarSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              {/* Conversation explorer — filter / sort / expand */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6 overflow-hidden">
+                <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Conversation Explorer</h3>
+                    <p className="text-white/30 text-xs mt-0.5">Click any row to read the user message, AI response & full summary</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px]">
+                    {/* Filter pills */}
+                    <div className="flex p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                      {([
+                        { id: 'real',      label: 'Signal',    desc: 'with project, intent or contact' },
+                        { id: 'qualified', label: 'Qualified', desc: 'only AI-qualified' },
+                        { id: 'contact',   label: 'Contact',   desc: 'left email/phone' },
+                        { id: 'all',       label: 'All',       desc: 'everything' },
+                      ] as const).map(f => (
+                        <button
+                          key={f.id}
+                          onClick={() => setConvoFilter(f.id)}
+                          title={f.desc}
+                          className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${convoFilter === f.id ? 'bg-white/[0.08] text-white' : 'text-white/40 hover:text-white/70'}`}
+                        >{f.label}</button>
+                      ))}
+                    </div>
+                    {/* Sort */}
+                    <div className="flex p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                      {([
+                        { id: 'qualified', label: 'Rank' },
+                        { id: 'score',     label: 'Score' },
+                        { id: 'recent',    label: 'Recent' },
+                      ] as const).map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => setConvoSort(s.id)}
+                          className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${convoSort === s.id ? 'bg-white/[0.08] text-white' : 'text-white/40 hover:text-white/70'}`}
+                        >{s.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-white/30 mb-3">{workingList.length} shown · {convos.total} total</p>
+
+                <div className="overflow-x-auto -mx-2">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-white/40 text-[10px] uppercase tracking-wider border-b border-white/[0.06]">
+                        <th className="text-left py-3 px-2 font-semibold w-8"></th>
+                        <th className="text-left py-3 px-2 font-semibold">User · Contact</th>
+                        <th className="text-left py-3 px-2 font-semibold">User Message Preview</th>
+                        <th className="text-left py-3 px-2 font-semibold">Project</th>
+                        <th className="text-left py-3 px-2 font-semibold">Lang</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Msgs</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Score</th>
+                        <th className="text-right py-3 px-2 font-semibold">Status</th>
+                        <th className="text-right py-3 px-2 font-semibold">Started</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {workingList.length === 0 ? (
+                        <tr><td colSpan={9} className="py-10 text-center text-white/30">No conversations match this filter</td></tr>
+                      ) : workingList.map(c => {
+                        const isOpen = expandedConvo === c.id
+                        return (
+                          <React.Fragment key={c.id}>
+                            <tr
+                              className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                              onClick={() => setExpandedConvo(isOpen ? null : c.id)}
+                            >
+                              <td className="py-3 px-2 text-white/40">
+                                <span className={`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+                              </td>
+                              <td className="py-3 px-2">
+                                <div className="text-white font-medium truncate max-w-[140px]">{c.user_name ?? <span className="text-white/30">Anonymous</span>}</div>
+                                <div className="text-[10px] text-white/40 truncate max-w-[140px]">{c.user_email ?? c.user_phone ?? '—'}</div>
+                              </td>
+                              <td className="py-3 px-2 text-white/80">
+                                <div className="truncate max-w-[300px]" title={c.user_message ?? ''}>{c.user_message ?? <span className="text-white/30">no message captured</span>}</div>
+                              </td>
+                              <td className="py-3 px-2 text-white/70 truncate max-w-[120px]">{c._realProject ?? <span className="text-white/30">—</span>}</td>
+                              <td className="py-3 px-2 text-white/70 uppercase text-[10px]">{c.language ?? '—'}</td>
+                              <td className="text-right py-3 px-2 tabular-nums text-white/70">{c.message_count ?? '—'}</td>
+                              <td className="text-right py-3 px-2 tabular-nums font-semibold" style={{ color: Number(c.lead_score ?? 0) >= 50 ? GREEN : 'rgba(255,255,255,0.5)' }}>{c.lead_score ?? '—'}</td>
+                              <td className="text-right py-3 px-2">
+                                {c.qualified ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-500/15 text-green-400 text-[10px] font-semibold">
+                                    <span className="w-1 h-1 rounded-full bg-green-400" /> Qualified
+                                  </span>
+                                ) : c.has_contact_info ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-semibold">Contact</span>
+                                ) : <span className="text-white/30 text-[10px]">—</span>}
+                              </td>
+                              <td className="text-right py-3 px-2 text-[10px] text-white/40 tabular-nums">{(c.started_at ?? '').slice(0, 10)}</td>
+                            </tr>
+
+                            {/* Expanded row — full conversation detail */}
+                            {isOpen && (
+                              <tr className="bg-white/[0.02]">
+                                <td colSpan={9} className="px-4 py-5">
+                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                    {/* User message */}
+                                    <div className="bg-black/40 border border-white/[0.06] rounded-xl p-4">
+                                      <p className="text-[10px] uppercase tracking-wider text-blue-400 font-semibold mb-2">User Message</p>
+                                      <p className="text-xs text-white/80 leading-relaxed whitespace-pre-wrap">{c.user_message || <span className="text-white/30">No user message stored</span>}</p>
+                                    </div>
+                                    {/* AI response */}
+                                    <div className="bg-black/40 border border-white/[0.06] rounded-xl p-4">
+                                      <p className="text-[10px] uppercase tracking-wider text-purple-400 font-semibold mb-2">AI Response</p>
+                                      <p className="text-xs text-white/80 leading-relaxed whitespace-pre-wrap">{c.ai_response || <span className="text-white/30">No AI response stored</span>}</p>
+                                    </div>
+                                    {/* Summary + meta */}
+                                    <div className="bg-black/40 border border-white/[0.06] rounded-xl p-4 space-y-3">
+                                      <div>
+                                        <p className="text-[10px] uppercase tracking-wider text-green-400 font-semibold mb-2">AI Summary</p>
+                                        <p className="text-xs text-white/80 leading-relaxed">{c.summary || <span className="text-white/30">No summary</span>}</p>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2 text-[11px] pt-2 border-t border-white/[0.06]">
+                                        <div><span className="text-white/40">Intent:</span> <span className="text-white">{c.intent ?? '—'}</span></div>
+                                        <div><span className="text-white/40">Urgency:</span> <span className="text-white">{c.urgency ?? '—'}</span></div>
+                                        <div><span className="text-white/40">Status:</span> <span className="text-white">{c.lead_status ?? '—'}</span></div>
+                                        <div><span className="text-white/40">Duration:</span> <span className="text-white">{c.duration_seconds ? `${c.duration_seconds}s` : '—'}</span></div>
+                                        <div><span className="text-white/40">Session:</span> <span className="text-white font-mono text-[10px]">{(c.session_id ?? '').slice(0, 16)}…</span></div>
+                                        <div><span className="text-white/40">Convo ID:</span> <span className="text-white font-mono text-[10px]">{(c.conversation_id ?? '').slice(0, 16)}…</span></div>
+                                      </div>
+                                      {c.page_url && (
+                                        <div className="pt-2 border-t border-white/[0.06]">
+                                          <p className="text-[10px] text-white/40 mb-1">From page:</p>
+                                          <a href={c.page_url} target="_blank" rel="noreferrer" className="text-[11px] text-purple-400 hover:text-purple-300 truncate block">{c.page_url}</a>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            QUALIFIED AI LEADS TAB — AI conversations turned into real leads
+        ════════════════════════════════════════════════════════════════════ */}
+        {tab === 'qualified' && (() => {
+          const allLeads = leadsStore?.leads ?? []
+          const qualifiedLeads = allLeads.filter(l => (l.source_sheet ?? '').toLowerCase() === 'ai_qualified_leads' || (l.source ?? '').toLowerCase() === 'ai_qualified_leads')
+
+          if (!leadsStore) return (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-20 text-center">
+              <div className="inline-block w-8 h-8 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin mb-3" />
+              <p className="text-white/40 text-sm">Loading qualified leads…</p>
+            </div>
+          )
+
+          if (qualifiedLeads.length === 0) return (
+            <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-20 text-center">
+              <div className="text-3xl mb-3">✦</div>
+              <p className="text-white font-semibold">No qualified AI leads yet</p>
+              <p className="text-white/40 text-sm mt-1 max-w-md mx-auto">When AI detects buying/investment intent in a conversation, the lead will appear here.</p>
+            </div>
+          )
+
+          const hotCount     = qualifiedLeads.filter(l => ['hot','high'].includes((l.lead_quality ?? '').toLowerCase())).length
+          const warmCount    = qualifiedLeads.filter(l => (l.lead_quality ?? '').toLowerCase() === 'warm').length
+          const coldCount    = qualifiedLeads.filter(l => (l.lead_quality ?? '').toLowerCase() === 'cold').length
+          const invalidCount = qualifiedLeads.filter(l => (l.lead_quality ?? '').toLowerCase() === 'invalid').length
+          const highIntent   = qualifiedLeads.filter(l => ['high','medium'].includes((l.buyer_intent ?? '').toLowerCase())).length
+
+          // Conversion rate vs total AI conversations
+          const conversionRate = (convos && convos.total > 0) ? ((qualifiedLeads.length / convos.total) * 100).toFixed(1) : '—'
+
+          // Score buckets
+          const scoreBuckets = [
+            { name: '0-19 Invalid', count: qualifiedLeads.filter(l => Number(l.lead_score ?? 0) < 20).length, color: '#EF4444' },
+            { name: '20-49 Cold',   count: qualifiedLeads.filter(l => { const s = Number(l.lead_score ?? 0); return s >= 20 && s < 50 }).length, color: '#F97316' },
+            { name: '50-79 Warm',   count: qualifiedLeads.filter(l => { const s = Number(l.lead_score ?? 0); return s >= 50 && s < 80 }).length, color: '#F59E0B' },
+            { name: '80-100 Hot',   count: qualifiedLeads.filter(l => Number(l.lead_score ?? 0) >= 80).length, color: '#10B981' },
+          ]
+
+          const intentDist = ['high', 'medium', 'low', 'none'].map(intent => ({
+            name: intent,
+            count: qualifiedLeads.filter(l => (l.buyer_intent ?? '').toLowerCase() === intent).length,
+          }))
+
+          return (
+            <div className="space-y-4">
+              {/* KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <KpiCard label="Qualified Total" value={fmtNum(qualifiedLeads.length)} sub="AI-detected intent" accent={PURPLE} />
+                <KpiCard label="AI Conv. Rate" value={typeof conversionRate === 'string' ? conversionRate + '%' : '—'} sub="vs AI conversations" accent={GREEN} />
+                <KpiCard label="Hot" value={fmtNum(hotCount)} sub="score ≥ 80" accent={'#10B981'} />
+                <KpiCard label="Warm" value={fmtNum(warmCount)} sub="score 50-79" accent={GOLD} />
+                <KpiCard label="High Intent" value={fmtNum(highIntent)} sub="medium + high" accent={BLUE} />
+              </div>
+
+              {/* Distributions */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Quality donut */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Lead Quality</h3>
+                  <p className="text-white/30 text-xs mb-4">Hot / Warm / Cold / Invalid breakdown</p>
+                  <div className="flex items-center gap-4">
+                    <ResponsiveContainer width="45%" height={180}>
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'Hot', value: hotCount },
+                            { name: 'Warm', value: warmCount },
+                            { name: 'Cold', value: coldCount },
+                            { name: 'Invalid', value: invalidCount },
+                          ]}
+                          cx="50%" cy="50%" innerRadius={42} outerRadius={70} paddingAngle={2} dataKey="value" nameKey="name"
+                        >
+                          <Cell fill="#10B981" stroke="none" />
+                          <Cell fill="#F59E0B" stroke="none" />
+                          <Cell fill="#3B82F6" stroke="none" />
+                          <Cell fill="#EF4444" stroke="none" />
+                        </Pie>
+                        <Tooltip content={<DarkTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-2 text-xs">
+                      <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500" />Hot</span><span className="text-white/60 tabular-nums">{hotCount}</span></div>
+                      <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-500" />Warm</span><span className="text-white/60 tabular-nums">{warmCount}</span></div>
+                      <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500" />Cold</span><span className="text-white/60 tabular-nums">{coldCount}</span></div>
+                      <div className="flex items-center justify-between"><span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-red-500" />Invalid</span><span className="text-white/60 tabular-nums">{invalidCount}</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Score distribution */}
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-1">Lead Score Distribution</h3>
+                  <p className="text-white/30 text-xs mb-4">Score buckets across qualified leads</p>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={scoreBuckets}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                      <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                      <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={50}>
+                        {scoreBuckets.map((b, i) => <Cell key={i} fill={b.color} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Intent + Urgency */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                <h3 className="text-sm font-semibold text-white mb-1">Buyer Intent Distribution</h3>
+                <p className="text-white/30 text-xs mb-4">How interested each qualified lead is</p>
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart data={intentDist}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 10 }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                    <Bar dataKey="count" name="Leads" fill={PURPLE} radius={[6, 6, 0, 0]} maxBarSize={60} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Qualified leads table */}
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5 md:p-6 overflow-hidden">
+                <h3 className="text-sm font-semibold text-white mb-1">Qualified AI Leads</h3>
+                <p className="text-white/30 text-xs mb-5">Conversations that converted to real leads</p>
+                <div className="overflow-x-auto -mx-2">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-white/40 text-[10px] uppercase tracking-wider border-b border-white/[0.06]">
+                        <th className="text-left py-3 px-2 font-semibold">Name · Contact</th>
+                        <th className="text-left py-3 px-2 font-semibold">Property Interest</th>
+                        <th className="text-left py-3 px-2 font-semibold">Quality</th>
+                        <th className="text-right py-3 px-2 font-semibold tabular-nums">Score</th>
+                        <th className="text-left py-3 px-2 font-semibold">Intent</th>
+                        <th className="text-left py-3 px-2 font-semibold">Next Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {qualifiedLeads.slice(0, 30).map(l => (
+                        <tr key={l.id} className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 px-2">
+                            <div className="text-white font-medium">{l.full_name ?? <span className="text-white/30">—</span>}</div>
+                            <div className="text-[10px] text-white/40 truncate max-w-[180px]">{l.email ?? l.phone ?? '—'}</div>
+                          </td>
+                          <td className="py-3 px-2 text-white/70"><div className="truncate max-w-[260px]">{l.property_interest ?? <span className="text-white/30">—</span>}</div></td>
+                          <td className="py-3 px-2">
+                            {l.lead_quality ? (
+                              <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize" style={{
+                                background: l.lead_quality === 'hot' ? 'rgba(16,185,129,0.15)' : l.lead_quality === 'warm' ? 'rgba(245,158,11,0.15)' : l.lead_quality === 'invalid' ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)',
+                                color: l.lead_quality === 'hot' ? '#10B981' : l.lead_quality === 'warm' ? '#F59E0B' : l.lead_quality === 'invalid' ? '#EF4444' : '#3B82F6',
+                              }}>{l.lead_quality}</span>
+                            ) : <span className="text-white/30">—</span>}
+                          </td>
+                          <td className="text-right py-3 px-2 tabular-nums font-semibold" style={{ color: Number(l.lead_score ?? 0) >= 50 ? GREEN : 'rgba(255,255,255,0.5)' }}>{l.lead_score ?? '—'}</td>
+                          <td className="py-3 px-2 text-white/70 capitalize">{l.buyer_intent ?? <span className="text-white/30">—</span>}</td>
+                          <td className="py-3 px-2 text-white/70"><div className="truncate max-w-[200px]">{l.recommended_next_action ?? <span className="text-white/30">—</span>}</div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            COMBINED LEAD PERFORMANCE (form + qualified AI) — was: LEADS CRM
+        ════════════════════════════════════════════════════════════════════ */}
+        {tab === 'combined' && (() => {
           const leads       = leadsStore?.leads ?? []
           const leadsTotal  = leadsStore?.total ?? 0
           const hotCount    = leads.filter(l => ['hot','high'].includes((l.lead_quality ?? '').toLowerCase())).length
@@ -2035,6 +2749,23 @@ export default function Dashboard() {
           )
         })()}
 
+        {/* ════════════════════════════════════════════════════════════════════
+            VOICE TAB — placeholder until Vapi pipeline lands
+        ════════════════════════════════════════════════════════════════════ */}
+        {tab === 'voice' && (
+          <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-16 px-6 text-center">
+            <div className="text-4xl mb-3">🎙</div>
+            <p className="text-white font-semibold text-lg">Voice Leads & Conversations</p>
+            <p className="text-white/40 text-sm mt-2 max-w-md mx-auto">
+              The voice pipeline (Vapi inbound calls + outbound campaigns) isn&apos;t connected yet.
+              When it is, calls and transcripts will land here automatically.
+            </p>
+            <div className="mt-6 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+              Awaiting Vapi credential & first call
+            </div>
+          </div>
+        )}
         {/* ════════════════════════════════════════════════════════════════════
             AI INSIGHTS TAB
         ════════════════════════════════════════════════════════════════════ */}
