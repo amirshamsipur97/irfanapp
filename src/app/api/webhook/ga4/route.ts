@@ -8,12 +8,14 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
+  const source = typeof body?.source === 'string' ? body.source : 'google_analytics_4'
 
   // n8n sends: { source, generated_at, total_records, data: [...rows] }
   const rawRows: Record<string, unknown>[] = body?.data ?? (Array.isArray(body) ? body : [body])
 
+  // Empty payload is OK — return success with 0
   if (!rawRows.length) {
-    return NextResponse.json({ error: 'No rows in payload' }, { status: 400 })
+    return NextResponse.json({ success: true, source, total_records: 0 })
   }
 
   const rows = rawRows
@@ -40,5 +42,5 @@ export async function POST(req: NextRequest) {
   const { error } = await analyticsDb.from('analytics_ga4').insert(rows)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ success: true, count: rows.length })
+  return NextResponse.json({ success: true, source, total_records: rows.length })
 }
