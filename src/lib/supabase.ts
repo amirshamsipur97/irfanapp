@@ -1,10 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_ANON_KEY!
+// Server-only app: prefer the service-role key so RLS can stay ON for anon.
+// Falls back to the anon key until SUPABASE_SERVICE_ROLE_KEY is configured.
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
 
 // Main client — analytics table uses prefix 'analytics_' to stay separate from property tables
-export const supabase = createClient(supabaseUrl, supabaseKey)
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false },
+})
 export const analyticsDb = supabase
 
 export interface GA4Row {

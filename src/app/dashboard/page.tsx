@@ -326,7 +326,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (tab === 'calls') loadCalls(1)
+    if (tab === 'calls' || tab === 'voice') loadCalls(1)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, callsSearch, callsSource, callsStatus])
 
@@ -458,6 +458,13 @@ export default function Dashboard() {
               {loadingAnalysis
                 ? <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Analyzing…</>
                 : <>✦ AI Analysis</>}
+            </button>
+            <button
+              onClick={async () => { await fetch('/api/auth', { method: 'DELETE' }); window.location.href = '/login' }}
+              title="Sign out"
+              className="px-3 py-2 rounded-xl text-xs font-medium bg-white/[0.05] border border-white/[0.08] text-white/45 hover:text-white/80 transition-colors"
+            >
+              ⎋ Sign out
             </button>
           </div>
         </div>
@@ -2750,22 +2757,90 @@ export default function Dashboard() {
         })()}
 
         {/* ════════════════════════════════════════════════════════════════════
-            VOICE TAB — placeholder until Vapi pipeline lands
+            VOICE TAB — live Vapi conversations (summaries + transcripts)
         ════════════════════════════════════════════════════════════════════ */}
-        {tab === 'voice' && (
-          <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-16 px-6 text-center">
-            <div className="text-4xl mb-3">🎙</div>
-            <p className="text-white font-semibold text-lg">Voice Leads & Conversations</p>
-            <p className="text-white/40 text-sm mt-2 max-w-md mx-auto">
-              The voice pipeline (Vapi inbound calls + outbound campaigns) isn&apos;t connected yet.
-              When it is, calls and transcripts will land here automatically.
-            </p>
-            <div className="mt-6 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
-              Awaiting Vapi credential & first call
+        {tab === 'voice' && (() => {
+          const vCalls = (callsStore?.calls ?? []).filter(c => c.call_summary || c.call_transcript || c.vapi_call_id)
+          const s = callsStore?.stats ?? { total:0,inbound:0,outbound:0,booked:0,interested:0,not_interested:0,no_answer:0,attempts_24h:0 }
+          const fmtDateTime = (d: string | null) => {
+            if (!d) return ''
+            try { return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) } catch { return d }
+          }
+          return (
+            <div className="space-y-4">
+              {/* Status + KPIs */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Vapi pipeline connected — calls land here automatically
+                </div>
+                <button onClick={() => loadCalls(1)} className="text-xs text-white/30 hover:text-white/60 transition-colors">↻ Refresh</button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {([
+                  ['Voice Leads', s.total], ['Inbound', s.inbound], ['Outbound', s.outbound],
+                  ['Booked', s.booked], ['Interested', s.interested], ['Calls 24h', s.attempts_24h],
+                ] as [string, number][]).map(([k, v]) => (
+                  <div key={k} className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-4">
+                    <div className="text-2xl font-bold text-white">{v}</div>
+                    <div className="text-xs text-white/35 mt-1">{k}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Conversations */}
+              {callsLoading && (
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-16 text-center text-white/30 text-sm">Loading conversations…</div>
+              )}
+              {!callsLoading && vCalls.length === 0 && (
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-2xl py-16 px-6 text-center">
+                  <div className="text-4xl mb-3">🎙</div>
+                  <p className="text-white font-semibold text-lg">No voice conversations yet</p>
+                  <p className="text-white/40 text-sm mt-2">The pipeline is live — the next Vapi call will appear here with its transcript.</p>
+                </div>
+              )}
+              {!callsLoading && vCalls.map(call => (
+                <div key={call.id} className="bg-white/[0.04] border border-white/[0.08] rounded-2xl p-5">
+                  <div className="flex items-start justify-between flex-wrap gap-2">
+                    <div>
+                      <span className="text-white font-semibold">{call.full_name || 'Unknown caller'}</span>
+                      <span className="text-white/35 text-sm ml-2">{call.phone}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {call.voice_source && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${call.voice_source === 'inbound' ? 'bg-sky-500/10 border-sky-500/20 text-sky-400' : 'bg-violet-500/10 border-violet-500/20 text-violet-400'}`}>
+                          {call.voice_source}
+                        </span>
+                      )}
+                      {call.call_status && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${call.call_status === 'booked' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : call.call_status === 'not_interested' ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-white/[0.06] border-white/[0.1] text-white/45'}`}>
+                          {call.call_status}
+                        </span>
+                      )}
+                      {call.lead_score != null && Number(call.lead_score) > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 border border-amber-500/20 text-amber-400">score {call.lead_score}</span>
+                      )}
+                    </div>
+                  </div>
+                  {call.call_summary && (
+                    <p className="text-white/60 text-sm mt-3 leading-relaxed">{call.call_summary}</p>
+                  )}
+                  <div className="flex items-center gap-4 mt-3 text-[11px] text-white/25">
+                    {call.last_called_at && <span>{fmtDateTime(call.last_called_at)}</span>}
+                    {call.vapi_call_id && <span>call {call.vapi_call_id.slice(0, 12)}…</span>}
+                    {call.property_interest && <span>{call.property_interest}</span>}
+                  </div>
+                  {call.call_transcript && (
+                    <details className="mt-3 group">
+                      <summary className="cursor-pointer text-xs text-white/35 hover:text-white/60 transition-colors select-none">Show transcript</summary>
+                      <pre className="mt-2 p-3 rounded-xl bg-black/30 border border-white/[0.06] text-white/55 text-xs whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">{call.call_transcript}</pre>
+                    </details>
+                  )}
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          )
+        })()}
         {/* ════════════════════════════════════════════════════════════════════
             AI INSIGHTS TAB
         ════════════════════════════════════════════════════════════════════ */}

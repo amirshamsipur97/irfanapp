@@ -1,8 +1,50 @@
 # 🚀 irfanapp — Session Handoff Document
 
-**Last updated:** 2026-07-01
-**Status:** Production deployed, active development
+**Last updated:** 2026-07-09
+**Status:** Production deployed, live customer traffic, voice pipeline operational
 **Purpose:** Complete context for a new Claude session to continue work seamlessly.
+
+---
+
+## 0. SESSION LOG 2026-07-01 → 07-09 (read this first — everything below §1 predates it)
+
+### Voice call system — OPERATIONAL end-to-end ☎️
+- **Number:** US +1 775 451 2951 (separate PAID Twilio account; the old trial account has zero numbers and caused the original "number not available"). Imported into Vapi, `phoneNumberId = ebc17de7-303b-4ec3-be6d-cd9feaa086ea`.
+- **Assistant:** "Irfaninvest Ai agent" `69029075-4a30-4d17-90c6-b38d6298db6d` (persona "Sam", claude-haiku-4-5, prompt includes freehold/residency pitch). Ghost Vapi number +96876644000 (`f76c18da…`, assistant Riley) is deletable.
+- **Vapi Private key** lives in the n8n `Create Vapi Outbound Call` node Authorization header (`9f285a71-…`). Old `dc022924-…` key is dead (401).
+- **End-of-call loop:** assistant `server.url` → `https://analytics-test.app.n8n.cloud/webhook/vapi-call-ended-v2`, serverMessages=[end-of-call-report], analysisPlan.structuredDataPlan = **17 buyer-psychology fields** (interest_level, buyer_persona, sentiment, objections, lead_score, recommended_strategy, followup_message…). n8n `Extract Call Data` parses the NATIVE Vapi format (`body.message.analysis.structuredData.*`).
+- **Result sheets (amiralishamsipur@gmail.com):** report-after-call `1rMoYJgr-WNCOHdpUz9wxhg2eYmpyXem-tnd-jopsJeE` (25 cols) + call-conversation `1eucOgVN35UUaycduYcUdHKeDdsrAwYOhob6ap6uBYts` (20 cols incl. psychology). Written by n8n nodes `Save Call Report Sheet` / `Save Psychology Sheet` using credential **"Google Sheets account 4" (`uThv0wq533tfO2eV`)** — accounts 1–2 are token-dead, 4/5/6 work.
+- **Latency tuned** (user felt delay): startSpeakingPlan.waitSeconds 0.4→0.3, livekit waitFunction max 2000→**1100ms**, backoffSeconds 1→0.7. Baseline turn avg was ~3.6s. ⚠️ Transcriber is `flux-general-en` (ENGLISH-ONLY) — Persian/Arabic callers can't be transcribed; switching to a multilingual Deepgram model is an open decision.
+- **Real customers already called:** Ifthakhar Eresh (+44), Essam Sakr (+971) on 07-07.
+
+### n8n (account now PRO — free-plan quota exhaustion caused a 2-run outage 07-07 09:30–10:00)
+- Main wf `M2Yct119lYGxAuGu` (30-min sync) — active, green. Legacy duplicate wf `GkEb3JMttD90NLHs` **deactivated** (was double-pulling GA4/Ads to a dead host).
+- Auto-call watcher `GBgpcthXcl5MbwZw` — active, ~every 2-4 min, reads Form Property Database sheet, dedupes by Lead ID history, timezone-gated, max 5/run, sends `metadata.lead_id`.
+- `Interested?` IF node fixed (loose validation single OR condition — old strict-boolean crashed every end-of-call). Legacy sheet/WhatsApp/update nodes set onError=continue.
+
+### Lead pipeline — duplicate ROOT CAUSE fixed (07-07)
+- `leads.dedup_key` column default = `gen_random_uuid()`; edge fn never set it → every site lead duplicated 30 min later by the n8n sync. **Fixed:** migration `merge_duplicate_leads_and_canonical_dedup_keys` (merged 23 dup pairs, 134→111 rows, normalized ALL phones to `+digits`) + **submit-form edge fn v8** computes the same canonical key (E:email → P:last-8-digits → C:lead_id), normalizes phone, UPSERTs on dedup_key. E2E verified (double-submit → same row id).
+- `/api/leads/for-calling` rewritten: `since` param (new-leads-only), `e164_phone` normalization, test-row exclusion (`__*`,`zz*`,`*test*`,`*probe*`), null-quality allowed, attempts cap. n8n reads it with `x-webhook-secret`.
+
+### Dashboard app hardening (this repo)
+- **Auth:** `/login` page + `POST/DELETE /api/auth` + `src/proxy.ts` (Next 16 middleware) — HMAC httpOnly cookie `dash_session` (30d, AUTH_SECRET). Gates ALL pages + data APIs. Public: `/`, `/login`, `/api/auth`, `/api/health`, `/api/webhook/*`; machines pass with `x-webhook-secret`. **Dashboard password: `Irfan-Dash-f81d3c19`** (env DASHBOARD_PASSWORD; in Vercel prod + .env.local).
+- Security headers in next.config; `.env.example`; package renamed my-app→irfanapp v1.0.0; README rewritten; `/api/health` public probe; Sign-out button; **Voice tab** wired to live `/api/calls` data (old "Awaiting Vapi credential" was a hardcoded placeholder); **Peyda fonts** bundled (`public/fonts`, Persian glyphs auto-render via font stack).
+- `lib/supabase.ts` prefers `SUPABASE_SERVICE_ROLE_KEY` (anon fallback). **RLS phase 1 APPLIED** in Supabase (properties/projects/project_units/areas/developers = anon SELECT-only). **RLS phase 2 (leads/call_attempts/analytics_*) PREPARED but waiting for the user to provide the service_role key** → set in Vercel → apply → verify.
+- Landing `/` = dark-green Figma landing (DataWise-style) with real product content.
+- Standards audit artifact: https://claude.ai/code/artifact/2aa44215-0926-43e0-9fd9-2ff932e043c8
+
+### Sister project — NexProp SaaS (SEPARATE repo `../propertyfinder`)
+- Startup productization of this system. **Live at https://nexprop.io** (Vercel project `propertyfinder`, needs `--scope amirshamsipurs-projects`). Dark Figma redesign (669:23117): floating SideNav w/ orange CTA, metallic NeXPROP wordmark, exact SVG sphere bg (757:28319), 6 mono modules, logo grid, red NeX™ band, Capture/Qualify/Automate/Analyze/Scale tabs, dark pricing/comparison. Fonts: Google Sans Flex (local) + JetBrains Mono. `/login` = workspace picker → tenant "irfaninvest" → this dashboard's login. Master SaaS spec: `docs/SAAS-MASTER-PROMPT.md` (this repo).
+
+### Google Ads (live campaign)
+- "AE | EN | Oman Property & Investment | Search | P1" started 07-03, in bid-learning. Early: CTR ~12.5%. ⚠️ Conversion tracking broken ("Detected issues") — import GA4 `generate_lead` as a Key Event into Ads; add UTMs to final URLs (0 leads have UTM). Keyword expansion material: `../whitewill-landing/marketing/semrush/`.
+
+### TOP TODOs for next session
+1. RLS phase 2 — needs `SUPABASE_SERVICE_ROLE_KEY` from the user (Supabase → Settings → API Keys).
+2. Google Ads conversion import (GA4 generate_lead) + UTM on final URLs — time-sensitive for bid learning.
+3. WhatsApp confirmations still on Twilio sandbox (nodes onError=continue) — switch to SMS via +17754512951 or verify a real sender.
+4. Vapi transcriber multilingual decision (fa/ar callers).
+5. Debt: dashboard/page.tsx ~2900 lines + ignoreBuildErrors; no tests/CI/Sentry; n8n hardcoded keys → credentials + rotate; KPI "ADS CLICKS" sums REMOVED campaigns.
 
 ---
 

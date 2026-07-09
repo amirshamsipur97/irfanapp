@@ -1,6 +1,6 @@
 {
-  "name": "my-app",
-  "version": "0.1.0",
+  "name": "irfanapp",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -27,5 +27,6 @@
     "eslint-config-next": "15.3.2",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "description": "irfaninvest.com analytics & lead-operations dashboard (GA4, Google Ads, form leads, AI conversations, Vapi voice calls)"
 }

@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# irfanapp — irfaninvest.com Analytics & Lead Operations Dashboard
 
-## Getting Started
+Internal dashboard for [irfaninvest.com](https://www.irfaninvest.com): GA4 traffic, Google Ads,
+website form leads, AI chat conversations, and Vapi voice-call operations — in one place.
 
-First, run the development server:
+**Production:** https://irfanapp.vercel.app (password-gated)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```
+irfaninvest.com (forms/chat/calls)      Google (GA4 · Ads)
+        │                                     │
+        ▼                                     │  every 30 min
+Supabase (leads, call_attempts, …)  ◄───  n8n  ───  Google Sheets
+        ▲                                     │
+        │  end-of-call report                 ▼  POST /api/webhook/* (x-webhook-secret)
+Vapi voice agent  ─────────────────►  this app  ──►  /dashboard (password)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **This app** is server-rendered Next.js 16; all Supabase access happens in API routes (no DB keys in the browser).
+- **n8n** pushes analytics + lead data into `/api/webhook/*` and reads the calling queue from `/api/leads/for-calling`, authenticating with the `x-webhook-secret` header.
+- **Vapi** posts end-of-call reports (transcript + buyer-psychology analysis) to n8n, which writes to Supabase, two Google result-sheets, and this dashboard.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Auth model
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Who | How |
+|---|---|
+| Humans | `/login` shared password (`DASHBOARD_PASSWORD`) → HMAC httpOnly cookie (30d). Gate lives in `src/proxy.ts` and covers all pages **and** data APIs. |
+| Machines (n8n) | `x-webhook-secret` header, checked in the proxy and per-route. |
+| Public | `/` landing, `/login`, `/api/health`, `/api/auth`, `/api/webhook/*` (each webhook verifies the secret itself). |
 
-## Learn More
+## Environment
 
-To learn more about Next.js, take a look at the following resources:
+Copy `.env.example` → `.env.local`. Production values live in Vercel.
+`SUPABASE_SERVICE_ROLE_KEY` is preferred (required once RLS phase 2 is applied); the anon key is only a fallback.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Develop & deploy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run dev          # local, http://localhost:3000
+vercel deploy --prod --yes   # production (Vercel Pro, server-side build)
+```
 
-## Deploy on Vercel
+Health probe: `GET /api/health` (public, no data).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Fonts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Peyda (the irfaninvest.com brand Persian face) is bundled in `public/fonts` — Latin text renders
+in Geist, Persian/Arabic falls through to Peyda automatically; `[dir="rtl"]`/`.font-peyda` force it.
+
+## Known debt (tracked in the standards audit)
+
+1. RLS phase 2 (sensitive tables) — pending `SUPABASE_SERVICE_ROLE_KEY` in Vercel.
+2. Hardcoded keys inside n8n workflow nodes (Vapi, Anthropic) — migrate to n8n credentials + rotate.
+3. `dashboard/page.tsx` (~2 900 lines) + `typescript.ignoreBuildErrors` — refactor & re-enable type checking.
+4. No automated tests / CI / error tracking yet.
